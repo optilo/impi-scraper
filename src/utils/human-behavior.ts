@@ -1,0 +1,125 @@
+/**
+ * Human-like behavior utilities for stealth scraping
+ */
+
+import type { Page } from 'playwright';
+
+/**
+ * Random delay between min and max milliseconds
+ */
+export function randomDelay(minMs: number, maxMs: number): Promise<void> {
+  const delay = Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
+  return new Promise(resolve => setTimeout(resolve, delay));
+}
+
+/**
+ * Add human-like behavior to a Playwright page
+ */
+export async function addHumanBehavior(page: Page): Promise<void> {
+  // Add random mouse movements occasionally
+  await page.evaluate(() => {
+    let moveCount = 0;
+    const maxMoves = Math.floor(Math.random() * 3) + 1;
+
+    const interval = setInterval(() => {
+      if (moveCount >= maxMoves) {
+        clearInterval(interval);
+        return;
+      }
+
+      const x = Math.floor(Math.random() * window.innerWidth);
+      const y = Math.floor(Math.random() * window.innerHeight);
+
+      const event = new MouseEvent('mousemove', {
+        clientX: x,
+        clientY: y,
+        bubbles: true
+      });
+
+      document.dispatchEvent(event);
+      moveCount++;
+    }, Math.random() * 2000 + 1000);
+  });
+
+  // Random viewport size (realistic desktop resolutions)
+  const viewports = [
+    { width: 1920, height: 1080 },
+    { width: 1440, height: 900 },
+    { width: 1536, height: 864 },
+    { width: 1366, height: 768 }
+  ];
+
+  const viewport = viewports[Math.floor(Math.random() * viewports.length)];
+  await page.setViewportSize(viewport);
+}
+
+/**
+ * Smooth mouse movement simulation
+ */
+export async function smoothMouseMove(page: Page, targetX: number, targetY: number, steps = 10): Promise<void> {
+  const currentPos = await page.evaluate(() => ({
+    x: Math.random() * window.innerWidth,
+    y: Math.random() * window.innerHeight
+  }));
+
+  for (let i = 0; i <= steps; i++) {
+    const progress = i / steps;
+    const x = currentPos.x + (targetX - currentPos.x) * progress;
+    const y = currentPos.y + (targetY - currentPos.y) * progress;
+
+    await page.mouse.move(x, y);
+    await randomDelay(10, 30);
+  }
+}
+
+/**
+ * Human-like scrolling
+ */
+export async function humanScroll(page: Page, direction: 'up' | 'down' = 'down', distance = 300): Promise<void> {
+  const scrollAmount = direction === 'down' ? distance : -distance;
+
+  await page.evaluate((amount) => {
+    const scrollSteps = 10;
+    const stepAmount = amount / scrollSteps;
+    let currentStep = 0;
+
+    const interval = setInterval(() => {
+      if (currentStep >= scrollSteps) {
+        clearInterval(interval);
+        return;
+      }
+
+      window.scrollBy(0, stepAmount);
+      currentStep++;
+    }, 50 + Math.random() * 50);
+  }, scrollAmount);
+
+  await randomDelay(500, 1000);
+}
+
+/**
+ * Rate limiter class
+ */
+export class RateLimiter {
+  private minDelay: number;
+  private maxDelay: number;
+  private lastRequestTime: number = 0;
+
+  constructor(minDelayMs = 1000, maxDelayMs = 3000) {
+    this.minDelay = minDelayMs;
+    this.maxDelay = maxDelayMs;
+  }
+
+  async waitIfNeeded(): Promise<void> {
+    const now = Date.now();
+    const timeSinceLastRequest = now - this.lastRequestTime;
+    const requiredDelay = Math.floor(Math.random() * (this.maxDelay - this.minDelay + 1)) + this.minDelay;
+
+    if (timeSinceLastRequest < requiredDelay) {
+      const waitTime = requiredDelay - timeSinceLastRequest;
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+    }
+
+    this.lastRequestTime = Date.now();
+  }
+}

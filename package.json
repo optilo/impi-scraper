@@ -1,11 +1,65 @@
 {
-  "name": "impi-scraper",
-  "module": "index.ts",
+  "name": "@optilo/impi-scraper",
+  "version": "1.0.0",
+  "description": "IMPI (Mexican trademark office) scraper with keyword search and human-like interactions",
+  "module": "src/index.ts",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
   "type": "module",
+  "exports": {
+    ".": {
+      "import": "./src/index.ts",
+      "types": "./src/index.ts"
+    }
+  },
+  "bin": {
+    "impi": "./cli.ts"
+  },
+  "files": [
+    "src",
+    "cli.ts",
+    "README.md"
+  ],
+  "scripts": {
+    "search": "bun cli.ts search",
+    "test": "bun test src/",
+    "test:watch": "bun test src/ --watch",
+    "test:integration": "bun test tests/ --timeout 180000",
+    "test:search": "bun test tests/search.integration.test.ts --timeout 120000",
+    "test:details": "bun test tests/details.integration.test.ts --timeout 180000",
+    "example:vitrum": "bun examples/search-vitrum.ts",
+    "example:full": "bun examples/full-details.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "impi",
+    "trademark",
+    "scraper",
+    "mexico",
+    "crawlee",
+    "playwright",
+    "web-scraping",
+    "intellectual-property",
+    "brand-search"
+  ],
+  "author": "Optilo",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/optilo/impi-scraper"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  },
   "devDependencies": {
     "@types/bun": "latest"
   },
   "peerDependencies": {
     "typescript": "^5"
+  },
+  "dependencies": {
+    "@crawlee/memory-storage": "^3.15.3",
+    "@crawlee/playwright": "^3.15.3",
+    "crawlee": "^3.15.3"
   }
 }
