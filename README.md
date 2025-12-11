@@ -7,6 +7,8 @@ A TypeScript scraper for IMPI (Instituto Mexicano de la Propiedad Industrial) - 
 - **Keyword Search**: Search trademarks by keyword
 - **Human-like Behavior**: Simulates real user interactions (mouse movements, typing delays, scrolling)
 - **Anti-Detection**: Built-in measures to avoid bot detection
+- **Proxy Support**: Route requests through HTTP/SOCKS proxies for IP rotation
+- **External IP Detection**: Returns the IP address used for each request
 - **Full Details**: Option to fetch complete trademark information including owners, classes, and history
 - **CLI Interface**: Easy command-line access with multiple output formats
 - **TypeScript**: Fully typed with comprehensive type definitions
@@ -49,6 +51,12 @@ bun cli.ts search vitrum --no-human
 
 # Limit results
 bun cli.ts search nike --limit 5
+
+# Search with proxy
+bun cli.ts search vitrum --proxy http://user:pass@proxy.example.com:8080
+
+# Using environment variable for proxy
+IMPI_PROXY_URL=http://proxy:8080 bun cli.ts search vitrum
 ```
 
 ### CLI Options
@@ -61,7 +69,17 @@ bun cli.ts search nike --limit 5
 | `--no-human` | | Disable human-like behavior (faster) |
 | `--limit NUM` | `-l` | Limit number of results |
 | `--format` | | Output format: json, table, summary |
+| `--proxy URL` | `-p` | Proxy server URL |
 | `--help` | `-h` | Show help |
+
+### Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `IMPI_PROXY_URL` | Proxy URL (highest priority) |
+| `PROXY_URL` | Proxy URL (fallback) |
+| `HTTP_PROXY` | Proxy URL (fallback) |
+| `HTTPS_PROXY` | Proxy URL (fallback) |
 
 ### Output Formats
 
@@ -117,6 +135,29 @@ results.results.forEach(tm => {
 });
 ```
 
+### Search with Proxy
+
+```typescript
+import { searchTrademarks } from './src/index';
+
+// Option 1: Explicit proxy configuration
+const results = await searchTrademarks('vitrum', {
+  proxy: {
+    server: 'http://proxy.example.com:8080',
+    username: 'user',  // Optional
+    password: 'pass'   // Optional
+  }
+});
+
+// The external IP used is returned in metadata
+console.log(`Search used IP: ${results.metadata.externalIp}`);
+
+// Option 2: Use environment variable (automatically detected)
+// Set IMPI_PROXY_URL=http://user:pass@proxy:8080 before running
+const results2 = await searchTrademarks('vitrum');
+// Proxy will be automatically used from env var
+```
+
 ## Configuration Options
 
 | Option | Type | Default | Description |
@@ -127,6 +168,23 @@ results.results.forEach(tm => {
 | `maxRetries` | number | `3` | Max retries on failure |
 | `humanBehavior` | boolean | `true` | Enable human-like interactions |
 | `detailLevel` | 'basic' \| 'full' | `'basic'` | Level of detail to fetch |
+| `proxy` | ProxyConfig | `undefined` | Proxy configuration (see below) |
+
+### Proxy Configuration
+
+```typescript
+interface ProxyConfig {
+  server: string;      // e.g., "http://proxy.example.com:8080"
+  username?: string;   // Optional proxy authentication
+  password?: string;
+}
+```
+
+**Priority order:**
+1. Explicit `proxy` option in code
+2. `IMPI_PROXY_URL` environment variable
+3. `PROXY_URL` environment variable
+4. `HTTP_PROXY` / `HTTPS_PROXY` environment variables
 
 ## Response Structure
 
@@ -138,6 +196,7 @@ interface SearchResults {
     searchId: string | null;     // UUID for the search
     searchUrl: string | null;    // Direct link to IMPI results
     totalResults?: number;
+    externalIp?: string | null;  // IP address used for the request
   };
   results: TrademarkResult[];
   performance: {
@@ -319,10 +378,13 @@ impi-scraper/
 │       ├── human-behavior.ts # Anti-detection utilities
 │       ├── human-behavior.test.ts
 │       ├── data.ts           # Data parsing utilities
-│       └── data.test.ts
+│       ├── data.test.ts
+│       ├── proxy.ts          # Proxy configuration utilities
+│       └── proxy.test.ts
 ├── tests/
 │   ├── search.integration.test.ts   # Keyword search tests
-│   └── details.integration.test.ts  # Full details tests
+│   ├── details.integration.test.ts  # Full details tests
+│   └── proxy.integration.test.ts    # Proxy functionality tests
 ├── examples/
 │   ├── search-vitrum.ts      # Basic search example
 │   └── full-details.ts       # Full details example
@@ -384,6 +446,9 @@ git submodule add <repo-url> packages/impi-scraper
 - Human behavior simulation adds slight delays but helps avoid detection
 - Full detail mode makes additional API calls per result (slower but more data)
 - Results are returned in ISO date format (YYYY-MM-DD)
+- External IP is detected at the start of each search session using ipify.org
+- Proxy configuration supports HTTP, HTTPS, and SOCKS5 protocols
+- When using rotating proxies, each browser session gets a fresh IP
 
 ## License
 

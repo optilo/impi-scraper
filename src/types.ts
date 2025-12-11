@@ -70,6 +70,12 @@ export class IMPIError extends Error {
 // Configuration
 // ============================================================================
 
+export interface ProxyConfig {
+  server: string;
+  username?: string;
+  password?: string;
+}
+
 export interface IMPIScraperOptions {
   headless?: boolean;
   rateLimitMs?: number;
@@ -78,6 +84,9 @@ export interface IMPIScraperOptions {
   humanBehavior?: boolean;
   detailLevel?: 'basic' | 'full';
   maxResults?: number;
+  proxy?: ProxyConfig;           // Rotating proxy config for IP rotation
+  detailTimeoutMs?: number;      // Timeout for fetching individual trademark details (default: 30000)
+  browserTimeoutMs?: number;     // Timeout before refreshing browser (default: 300000 = 5min)
 }
 
 export interface SearchMetadata {
@@ -86,6 +95,7 @@ export interface SearchMetadata {
   searchId: string | null;
   searchUrl: string | null;
   totalResults?: number;
+  externalIp?: string | null;  // IP address used for the request (useful for proxy verification)
 }
 
 export interface TrademarkOwner {

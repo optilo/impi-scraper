@@ -23,6 +23,7 @@
 
 export { IMPIScraper } from './scraper';
 export { searchTrademarks } from './api';
+export { parseProxyUrl, parseProxyFromEnv, resolveProxyConfig } from './utils/proxy';
 export {
   // Error class
   IMPIError
@@ -30,6 +31,7 @@ export {
 export type {
   // Configuration
   IMPIScraperOptions,
+  ProxyConfig,
 
   // Errors
   IMPIErrorCode,

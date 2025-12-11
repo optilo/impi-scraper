@@ -5,9 +5,11 @@
 
 import { PlaywrightCrawler, log, Configuration } from 'crawlee';
 import { MemoryStorage } from '@crawlee/memory-storage';
-import type { Page } from 'playwright';
+import type { Page, Browser, BrowserContext } from 'playwright';
+import { chromium } from 'playwright';
 import { addHumanBehavior, randomDelay, smoothMouseMove } from './utils/human-behavior';
 import { parseDate } from './utils/data';
+import { detectExternalIp, resolveProxyConfig } from './utils/proxy';
 import {
   IMPIError,
   type IMPIScraperOptions,
@@ -17,7 +19,8 @@ import {
   type SearchResults,
   type IMPITrademarkRaw,
   type IMPIDetailsResponse,
-  type IMPISearchResponse
+  type IMPISearchResponse,
+  type ProxyConfig
 } from './types';
 
 const IMPI_CONFIG = {
@@ -92,11 +95,20 @@ async function detectBlockingIndicators(page: Page): Promise<{ blocked: boolean;
 }
 
 export class IMPIScraper {
-  private options: Required<IMPIScraperOptions>;
+  private options: Required<Omit<IMPIScraperOptions, 'proxy'>> & { proxy?: ProxyConfig };
   private results: TrademarkResult[] = [];
   private searchMetadata: SearchMetadata | null = null;
 
+  // Managed browser for detail fetching (with crash recovery)
+  private managedBrowser: Browser | null = null;
+  private managedContext: BrowserContext | null = null;
+  private managedPage: Page | null = null;
+  private browserStartTime: number = 0;
+
   constructor(options: IMPIScraperOptions = {}) {
+    // Resolve proxy from options or environment variables
+    const resolvedProxy = resolveProxyConfig(options.proxy);
+
     this.options = {
       headless: true,
       rateLimitMs: 2000,
@@ -105,8 +117,112 @@ export class IMPIScraper {
       humanBehavior: true,
       detailLevel: 'basic',
       maxResults: 0, // 0 = no limit
-      ...options
+      detailTimeoutMs: 30000, // 30 seconds per detail fetch
+      browserTimeoutMs: 300000, // 5 minutes before browser refresh
+      ...options,
+      proxy: resolvedProxy, // Use resolved proxy (options > env var)
     };
+  }
+
+  /**
+   * Get browser launch options with optional proxy
+   */
+  private getBrowserLaunchOptions() {
+    const launchOptions: any = {
+      headless: this.options.headless,
+      timeout: 60000,
+      args: [
+        '--disable-blink-features=AutomationControlled',
+        '--no-sandbox',
+        '--disable-dev-shm-usage',
+      ]
+    };
+
+    // Add proxy if configured
+    if (this.options.proxy) {
+      launchOptions.proxy = {
+        server: this.options.proxy.server,
+        username: this.options.proxy.username,
+        password: this.options.proxy.password,
+      };
+      log.info(`Proxy configured: ${this.options.proxy.server}`);
+    }
+
+    return launchOptions;
+  }
+
+  /**
+   * Create a fresh browser instance (gets new IP from rotating proxy)
+   */
+  private async createFreshBrowser(): Promise<{ browser: Browser; context: BrowserContext; page: Page }> {
+    // Close existing browser if any
+    await this.closeManagedBrowser();
+
+    log.info('Creating fresh browser instance' + (this.options.proxy ? ' (new IP from rotating proxy)' : ''));
+
+    const browser = await chromium.launch(this.getBrowserLaunchOptions());
+    const context = await browser.newContext({
+      userAgent: IMPI_CONFIG.userAgent,
+    });
+    const page = await context.newPage();
+
+    this.managedBrowser = browser;
+    this.managedContext = context;
+    this.managedPage = page;
+    this.browserStartTime = Date.now();
+
+    return { browser, context, page };
+  }
+
+  /**
+   * Close the managed browser
+   */
+  private async closeManagedBrowser(): Promise<void> {
+    try {
+      if (this.managedPage) {
+        await this.managedPage.close().catch(() => {});
+        this.managedPage = null;
+      }
+      if (this.managedContext) {
+        await this.managedContext.close().catch(() => {});
+        this.managedContext = null;
+      }
+      if (this.managedBrowser) {
+        await this.managedBrowser.close().catch(() => {});
+        this.managedBrowser = null;
+      }
+    } catch (err) {
+      log.debug(`Error closing browser: ${(err as Error).message}`);
+    }
+  }
+
+  /**
+   * Check if browser needs refresh (timeout or crash)
+   */
+  private browserNeedsRefresh(): boolean {
+    if (!this.managedBrowser || !this.managedPage) return true;
+
+    const elapsed = Date.now() - this.browserStartTime;
+    if (elapsed > this.options.browserTimeoutMs) {
+      log.info(`Browser timeout reached (${Math.round(elapsed / 1000)}s), will refresh`);
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Check if error indicates browser crash/closure
+   */
+  private isBrowserCrashError(err: Error): boolean {
+    const message = err.message.toLowerCase();
+    return message.includes('target page, context or browser has been closed') ||
+           message.includes('browser has been closed') ||
+           message.includes('context has been closed') ||
+           message.includes('page has been closed') ||
+           message.includes('protocol error') ||
+           message.includes('connection refused') ||
+           message.includes('target closed');
   }
 
   /**
@@ -114,6 +230,9 @@ export class IMPIScraper {
    */
   async search(query: string): Promise<SearchResults> {
     log.info(`Starting IMPI search for: "${query}"`);
+    if (this.options.proxy) {
+      log.info(`Using proxy: ${this.options.proxy.server}`);
+    }
 
     const startTime = Date.now();
     this.results = [];
@@ -121,7 +240,8 @@ export class IMPIScraper {
       query,
       executedAt: new Date().toISOString(),
       searchId: null,
-      searchUrl: null
+      searchUrl: null,
+      externalIp: null
     };
 
     const self = this;
@@ -151,19 +271,22 @@ export class IMPIScraper {
       },
 
       launchContext: {
-        launchOptions: {
-          headless: this.options.headless,
-          timeout: 60000, // 1 minute browser launch timeout
-          args: [
-            '--disable-blink-features=AutomationControlled',
-            '--no-sandbox',
-            '--disable-dev-shm-usage',
-          ]
-        }
+        launchOptions: this.getBrowserLaunchOptions()
       },
 
       async requestHandler({ page, request, log }) {
         log.info(`Processing: ${request.url}`);
+
+        // Detect external IP (verifies proxy is working if configured)
+        try {
+          const externalIp = await detectExternalIp(page);
+          self.searchMetadata!.externalIp = externalIp;
+          if (externalIp) {
+            log.info(`External IP: ${externalIp}`);
+          }
+        } catch (ipErr) {
+          log.debug(`Could not detect external IP: ${(ipErr as Error).message}`);
+        }
 
         if (self.options.humanBehavior) {
           await addHumanBehavior(page);
@@ -374,7 +497,11 @@ export class IMPIScraper {
       }
 
       const noResultsText = await page.textContent('body').catch(() => '');
-      if (noResultsText?.includes('No hay resultados') || noResultsText?.includes('No results')) {
+      if (noResultsText?.includes('No hay resultados') ||
+          noResultsText?.includes('No results') ||
+          noResultsText?.includes('Considera realizar una nueva búsqueda') ||
+          noResultsText?.includes('otros criterios')) {
+        log.info('No results found for this search');
         return {
           resultPage: [],
           totalResults: 0,
@@ -478,11 +605,18 @@ export class IMPIScraper {
 
   /**
    * Process full results (with detail API calls)
+   * Uses managed browser with crash recovery - spawns fresh browser with new IP on failure
    */
   private async processFullResults(page: Page, trademarks: IMPITrademarkRaw[], xsrfToken: string): Promise<void> {
     const limit = this.options.maxResults > 0 ? this.options.maxResults : trademarks.length;
     const toProcess = trademarks.slice(0, limit);
     log.info(`Processing ${toProcess.length} full results with details`);
+
+    // Track current XSRF token (may need to refresh after browser restart)
+    let currentXsrfToken = xsrfToken;
+    let currentPage: Page = page;
+    let browserRestarts = 0;
+    const maxBrowserRestarts = 5;
 
     for (let i = 0; i < toProcess.length; i++) {
       const trademark = toProcess[i];
@@ -493,18 +627,97 @@ export class IMPIScraper {
         await randomDelay(this.options.rateLimitMs, this.options.rateLimitMs + 1000);
       }
 
-      try {
-        const details = await this.fetchTrademarkDetails(page, trademark.id, xsrfToken);
-        const extracted = this.extractTrademarkData(trademark, details);
+      // Check if browser needs refresh (timeout)
+      if (this.browserNeedsRefresh() && browserRestarts < maxBrowserRestarts) {
+        try {
+          log.info(`Refreshing browser before trademark ${i + 1}/${toProcess.length}`);
+          const { page: newPage } = await this.createFreshBrowser();
+          currentPage = newPage;
+          currentXsrfToken = await this.getXsrfToken(currentPage);
+          browserRestarts++;
+          log.info(`Browser refreshed successfully (restart ${browserRestarts}/${maxBrowserRestarts})`);
+        } catch (refreshErr) {
+          log.warn(`Failed to refresh browser: ${(refreshErr as Error).message}`);
+        }
+      }
 
-        this.results.push({
-          ...this.searchMetadata!,
-          ...extracted
-        });
-      } catch (err) {
-        log.error(`Failed to process trademark ${trademark.id}: ${(err as Error).message}`);
+      // Retry logic with browser recovery
+      let retries = 0;
+      const maxRetries = this.options.maxRetries;
+      let success = false;
+
+      while (retries <= maxRetries && !success) {
+        try {
+          const details = await this.fetchTrademarkDetailsWithTimeout(currentPage, trademark.id, currentXsrfToken);
+          const extracted = this.extractTrademarkData(trademark, details);
+
+          this.results.push({
+            ...this.searchMetadata!,
+            ...extracted
+          });
+          success = true;
+        } catch (err) {
+          const error = err as Error;
+          retries++;
+
+          // Check if this is a browser crash error
+          if (this.isBrowserCrashError(error)) {
+            if (browserRestarts >= maxBrowserRestarts) {
+              log.error(`Max browser restarts (${maxBrowserRestarts}) reached, skipping remaining trademarks`);
+              log.error(`Failed at trademark ${i + 1}/${toProcess.length}: ${trademark.id}`);
+              return; // Exit early - too many browser crashes
+            }
+
+            log.warn(`Browser crash detected at trademark ${trademark.id}, spawning fresh browser (restart ${browserRestarts + 1}/${maxBrowserRestarts})`);
+
+            try {
+              const { page: newPage } = await this.createFreshBrowser();
+              currentPage = newPage;
+              currentXsrfToken = await this.getXsrfToken(currentPage);
+              browserRestarts++;
+              log.info(`Browser recovered successfully, retrying trademark ${trademark.id}`);
+              // Don't increment retries for browser recovery - we want to retry the same trademark
+              retries--;
+            } catch (recoveryErr) {
+              log.error(`Failed to recover browser: ${(recoveryErr as Error).message}`);
+              browserRestarts++;
+            }
+          } else if (retries <= maxRetries) {
+            log.warn(`Retry ${retries}/${maxRetries} for trademark ${trademark.id}: ${error.message}`);
+            await randomDelay(2000, 4000); // Wait before retry
+          } else {
+            log.error(`Failed to process trademark ${trademark.id} after ${maxRetries} retries: ${error.message}`);
+          }
+        }
       }
     }
+
+    // Cleanup managed browser
+    await this.closeManagedBrowser();
+
+    log.info(`Processed ${this.results.length}/${toProcess.length} trademarks (${browserRestarts} browser restarts)`);
+  }
+
+  /**
+   * Fetch trademark details with timeout
+   */
+  private async fetchTrademarkDetailsWithTimeout(page: Page, impiId: string, xsrfToken: string): Promise<IMPIDetailsResponse> {
+    const timeoutMs = this.options.detailTimeoutMs;
+
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => {
+        reject(createError(
+          'TIMEOUT',
+          `Detail fetch timeout after ${timeoutMs}ms for trademark ${impiId}`,
+          { url: `${IMPI_CONFIG.detailsApiUrl}/${impiId}` }
+        ));
+      }, timeoutMs);
+    });
+
+    return Promise.race([
+      this.fetchTrademarkDetails(page, impiId, xsrfToken),
+      timeoutPromise
+    ]);
   }
 
   /**

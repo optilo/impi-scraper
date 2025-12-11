@@ -23,7 +23,8 @@
 
 import { parseArgs } from 'util';
 import { IMPIScraper } from './src/index';
-import type { SearchResults } from './src/types';
+import { parseProxyUrl } from './src/utils/proxy';
+import type { SearchResults, ProxyConfig } from './src/types';
 
 const HELP = `
 IMPI Trademark Scraper CLI
@@ -41,7 +42,13 @@ OPTIONS:
   --no-human          Disable human-like behavior (faster but more detectable)
   --limit, -l NUM     Limit results to process
   --format FORMAT     Output format: json, table, summary (default: json)
+  --proxy URL         Proxy server URL (e.g., http://user:pass@host:port)
   --help, -h          Show this help
+
+ENVIRONMENT VARIABLES:
+  IMPI_PROXY_URL      Proxy URL (alternative to --proxy flag)
+  PROXY_URL           Proxy URL (fallback)
+  HTTP_PROXY          Proxy URL (fallback)
 
 EXAMPLES:
   # Basic search
@@ -55,6 +62,12 @@ EXAMPLES:
 
   # Table format output
   bun cli.ts search vitrum --format table
+
+  # Search with proxy
+  bun cli.ts search vitrum --proxy http://user:pass@proxy.example.com:8080
+
+  # Using environment variable for proxy
+  IMPI_PROXY_URL=http://proxy:8080 bun cli.ts search vitrum
 `;
 
 interface CLIOptions {
@@ -64,6 +77,7 @@ interface CLIOptions {
   human: boolean;
   limit?: number;
   format: 'json' | 'table' | 'summary';
+  proxy?: string;
   help: boolean;
 }
 
@@ -78,6 +92,7 @@ function parseCliArgs(): { command: string; keyword: string; options: CLIOptions
       'no-human': { type: 'boolean', default: false },
       limit: { type: 'string', short: 'l' },
       format: { type: 'string', default: 'json' },
+      proxy: { type: 'string', short: 'p' },
       help: { type: 'boolean', short: 'h', default: false },
     },
     allowPositionals: true,
@@ -96,6 +111,7 @@ function parseCliArgs(): { command: string; keyword: string; options: CLIOptions
       human: values['no-human'] ? false : true,
       limit: values.limit ? parseInt(values.limit as string, 10) : undefined,
       format: (values.format as 'json' | 'table' | 'summary') || 'json',
+      proxy: values.proxy as string | undefined,
       help: values.help as boolean,
     },
   };
@@ -107,7 +123,7 @@ function formatTable(results: SearchResults): string {
 
   lines.push(divider);
   lines.push(`Query: "${results.metadata.query}" | Found: ${results.metadata.totalResults} | Processed: ${results.results.length}`);
-  lines.push(`Duration: ${(results.performance.durationMs / 1000).toFixed(2)}s`);
+  lines.push(`Duration: ${(results.performance.durationMs / 1000).toFixed(2)}s | IP: ${results.metadata.externalIp || 'N/A'}`);
   lines.push(divider);
 
   lines.push(
@@ -141,6 +157,7 @@ function formatSummary(results: SearchResults): string {
   lines.push(`Total:      ${results.metadata.totalResults} trademarks found`);
   lines.push(`Processed:  ${results.results.length} results`);
   lines.push(`Duration:   ${(results.performance.durationMs / 1000).toFixed(2)} seconds`);
+  lines.push(`External IP: ${results.metadata.externalIp || 'N/A'}`);
   lines.push(`Search ID:  ${results.metadata.searchId || 'N/A'}`);
   lines.push('');
 
@@ -176,6 +193,15 @@ function formatSummary(results: SearchResults): string {
 async function runSearch(keyword: string, options: CLIOptions): Promise<void> {
   console.error(`Searching IMPI for "${keyword}"...`);
   console.error(`Mode: ${options.full ? 'full details' : 'basic'} | Browser: ${options.visible ? 'visible' : 'headless'} | Human behavior: ${options.human ? 'on' : 'off'}`);
+
+  // Parse proxy from CLI flag if provided
+  let proxy: ProxyConfig | undefined;
+  if (options.proxy) {
+    proxy = parseProxyUrl(options.proxy);
+    console.error(`Proxy: ${proxy.server}`);
+  } else {
+    console.error(`Proxy: from env or none`);
+  }
   console.error('');
 
   const scraper = new IMPIScraper({
@@ -183,6 +209,7 @@ async function runSearch(keyword: string, options: CLIOptions): Promise<void> {
     detailLevel: options.full ? 'full' : 'basic',
     humanBehavior: options.human,
     rateLimitMs: options.full ? 2500 : 2000,
+    proxy,
   });
 
   const results = await scraper.search(keyword);
@@ -215,6 +242,9 @@ async function runSearch(keyword: string, options: CLIOptions): Promise<void> {
   }
 
   console.error(`\nDone! Found ${results.metadata.totalResults} results, processed ${results.results.length}`);
+  if (results.metadata.externalIp) {
+    console.error(`External IP used: ${results.metadata.externalIp}`);
+  }
 }
 
 async function main(): Promise<void> {
