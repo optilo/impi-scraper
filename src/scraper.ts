@@ -287,8 +287,9 @@ export class IMPIScraper {
           await addHumanBehavior(page);
         }
 
-        const xsrfToken = await self.getXsrfToken(page);
-        const searchResults = await self.performSearch(page, query, xsrfToken);
+        // Crawler already navigated to search URL, so skip redundant navigations
+        const xsrfToken = await self.getXsrfToken(page, true);
+        const searchResults = await self.performSearch(page, query, xsrfToken, true);
 
         self.searchMetadata!.searchId = searchResults.searchId || null;
         self.searchMetadata!.searchUrl = searchResults.searchUrl || null;
@@ -339,11 +340,15 @@ export class IMPIScraper {
 
   /**
    * Get XSRF token from cookies
+   * @param page - The page to get token from
+   * @param skipNavigation - If true, assumes page is already on the search URL
    */
-  private async getXsrfToken(page: Page): Promise<string> {
+  private async getXsrfToken(page: Page, skipNavigation = false): Promise<string> {
     log.debug('Obtaining XSRF token');
 
-    await page.goto(IMPI_CONFIG.searchUrl, { waitUntil: 'networkidle' });
+    if (!skipNavigation) {
+      await page.goto(IMPI_CONFIG.searchUrl, { waitUntil: 'networkidle' });
+    }
 
     if (this.options.humanBehavior) {
       await randomDelay(200, 500);
@@ -379,8 +384,12 @@ export class IMPIScraper {
 
   /**
    * Perform search with human-like interaction
+   * @param page - The page already on the search URL
+   * @param query - Search query
+   * @param xsrfToken - XSRF token for API calls
+   * @param skipNavigation - If true, assumes page is already on search URL
    */
-  private async performSearch(page: Page, query: string, xsrfToken: string): Promise<IMPISearchResponse> {
+  private async performSearch(page: Page, query: string, xsrfToken: string, skipNavigation = false): Promise<IMPISearchResponse> {
     log.info('Performing search with human-like behavior');
 
     let searchData: IMPISearchResponse | null = null;
@@ -405,7 +414,10 @@ export class IMPIScraper {
       }
     });
 
-    await page.goto(IMPI_CONFIG.searchUrl);
+    // Only navigate if not already on the search page
+    if (!skipNavigation) {
+      await page.goto(IMPI_CONFIG.searchUrl);
+    }
 
     if (this.options.humanBehavior) {
       await randomDelay(300, 600);
