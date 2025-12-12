@@ -24,7 +24,7 @@ export async function addHumanBehavior(page: Page): Promise<void> {
     { width: 1200, height: 800 },
   ];
 
-  const viewport = viewports[Math.floor(Math.random() * viewports.length)];
+  const viewport = viewports[Math.floor(Math.random() * viewports.length)]!;
   await page.setViewportSize(viewport);
 }
 

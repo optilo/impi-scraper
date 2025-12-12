@@ -81,7 +81,7 @@ describe('Batch Search Integration', () => {
     expect(paginationResult!.metadata.totalResults).toBeGreaterThan(0);
 
     // Verify result structure
-    const firstResult = paginationResult!.results[0];
+    const firstResult = paginationResult!.results[0]!;
     expect(firstResult.impiId).toBeDefined();
     expect(firstResult.title.toLowerCase()).toContain(TEST_KEYWORDS.pagination.toLowerCase());
     expect(firstResult.status).toBeDefined();

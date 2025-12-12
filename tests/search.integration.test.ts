@@ -108,7 +108,7 @@ describe('Keyword Search Integration', () => {
       expect(result.owners).toBeDefined();
       expect(result.owners).toBeInstanceOf(Array);
       if (result.owners && result.owners.length > 0) {
-        const owner = result.owners[0];
+        const owner = result.owners[0]!;
         expect(owner.name).toBeDefined();
         expect(owner.name.length).toBeGreaterThan(0);
         // Owner name should be uppercase (company naming convention)
@@ -117,14 +117,14 @@ describe('Keyword Search Integration', () => {
 
       // ownerName should match first owner
       if (result.owners && result.owners.length > 0) {
-        expect(result.ownerName).toBe(result.owners[0].name);
+        expect(result.ownerName).toBe(result.owners[0]!.name);
       }
 
       // Classes validation (array structure)
       expect(result.classes).toBeDefined();
       expect(result.classes).toBeInstanceOf(Array);
       if (result.classes && result.classes.length > 0) {
-        const cls = result.classes[0];
+        const cls = result.classes[0]!;
         expect(cls.classNumber).toBeDefined();
         expect(typeof cls.classNumber).toBe('number');
         expect(cls.classNumber).toBeGreaterThanOrEqual(1);
@@ -149,7 +149,7 @@ describe('Keyword Search Integration', () => {
     console.log(`   Duration: ${(results.performance.durationMs / 1000).toFixed(2)}s`);
 
     // Sample first result
-    const first = results.results[0];
+    const first = results.results[0]!;
     console.log(`\n📝 Sample Result:`);
     console.log(`   IMPI ID: ${first.impiId}`);
     console.log(`   Title: ${first.title}`);

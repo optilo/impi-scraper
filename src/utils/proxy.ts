@@ -28,7 +28,7 @@ export async function detectExternalIp(page: Page): Promise<string | null> {
         const data = await response.json();
         const ip = service.parser(data);
         if (ip && typeof ip === 'string') {
-          return ip.split(',')[0].trim(); // Handle multiple IPs (X-Forwarded-For)
+          return ip.split(',')[0]!.trim(); // Handle multiple IPs (X-Forwarded-For)
         }
       }
     } catch {

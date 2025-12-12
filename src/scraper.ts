@@ -362,32 +362,33 @@ export class IMPIScraper {
 
       // Process each query
       for (let i = 0; i < queries.length; i++) {
-        const query = queries[i];
+        const query = queries[i]!;
         log.info(`[${i + 1}/${queries.length}] Searching: "${query}"`);
 
         try {
           // Reset state for this search
           this.results = [];
-          this.searchMetadata = {
+          const metadata: SearchMetadata = {
             query,
             executedAt: new Date().toISOString(),
             searchId: null,
             searchUrl: null,
             externalIp: null
           };
+          this.searchMetadata = metadata;
 
           // Perform search (page should already be on search URL or we navigate)
           const searchResults = await this.performSearch(page!, query, xsrfToken!, true);
 
-          this.searchMetadata.searchId = searchResults.searchId || null;
-          this.searchMetadata.searchUrl = searchResults.searchUrl || null;
-          this.searchMetadata.totalResults = searchResults.totalResults;
+          metadata.searchId = searchResults.searchId || null;
+          metadata.searchUrl = searchResults.searchUrl || null;
+          metadata.totalResults = searchResults.totalResults;
 
           // Process basic results
           await this.processBasicResults(searchResults.resultPage);
 
           const result: SearchResults = {
-            metadata: this.searchMetadata,
+            metadata,
             results: this.results,
             performance: {
               durationMs: 0,
@@ -763,8 +764,9 @@ export class IMPIScraper {
     const searchIdMatch = currentUrl.match(/[?&]s=([a-f0-9-]+)/i);
     const searchId = searchIdMatch ? searchIdMatch[1] : undefined;
 
-    // Check for results
-    if (!searchData || !searchData.resultPage) {
+    // Check for results (type assertion needed because TypeScript doesn't track closure mutations)
+    const hasResults = searchData !== null && (searchData as IMPISearchResponse).resultPage !== undefined;
+    if (!hasResults) {
       // Check for blocking indicators
       const blockCheck = await detectBlockingIndicators(page);
       if (blockCheck.blocked) {
@@ -803,11 +805,14 @@ export class IMPIScraper {
       );
     }
 
-    const totalResults = searchData.totalResults || searchData.resultPage.length;
-    const allResults = [...searchData.resultPage];
+    // At this point, searchData is guaranteed to have resultPage due to the check above
+    // Double assertion needed because TypeScript doesn't track closure mutations
+    const validSearchData = searchData as unknown as IMPISearchResponse;
+    const totalResults = validSearchData.totalResults || validSearchData.resultPage.length;
+    const allResults = [...validSearchData.resultPage];
 
     // Handle pagination if needed
-    const resultsPerPage = searchData.resultPage.length;
+    const resultsPerPage = validSearchData.resultPage.length;
     if (totalResults > resultsPerPage) {
       const totalPages = Math.ceil(totalResults / resultsPerPage);
       log.info(`Pagination detected: ${totalPages} pages`);
@@ -908,7 +913,7 @@ export class IMPIScraper {
     for (let i = 0; i < toProcess.length; i++) {
       const trademark = toProcess[i];
 
-      log.debug(`Fetching details ${i + 1}/${toProcess.length}: ${trademark.id}`);
+      log.debug(`Fetching details ${i + 1}/${toProcess.length}: ${trademark!.id}`);
 
       if (i > 0) {
         await randomDelay(this.options.rateLimitMs, this.options.rateLimitMs + 1000);
@@ -924,7 +929,7 @@ export class IMPIScraper {
           browserRestarts++;
           log.info(`Browser refreshed successfully (restart ${browserRestarts}/${maxBrowserRestarts})`);
         } catch (refreshErr) {
-          log.warn(`Failed to refresh browser: ${(refreshErr as Error).message}`);
+          log.warning(`Failed to refresh browser: ${(refreshErr as Error).message}`);
         }
       }
 
@@ -935,8 +940,8 @@ export class IMPIScraper {
 
       while (retries <= maxRetries && !success) {
         try {
-          const details = await this.fetchTrademarkDetailsWithTimeout(currentPage, trademark.id, currentXsrfToken);
-          const extracted = this.extractTrademarkData(trademark, details);
+          const details = await this.fetchTrademarkDetailsWithTimeout(currentPage, trademark!.id, currentXsrfToken);
+          const extracted = this.extractTrademarkData(trademark!, details);
 
           this.results.push({
             ...this.searchMetadata!,
@@ -951,18 +956,18 @@ export class IMPIScraper {
           if (this.isBrowserCrashError(error)) {
             if (browserRestarts >= maxBrowserRestarts) {
               log.error(`Max browser restarts (${maxBrowserRestarts}) reached, skipping remaining trademarks`);
-              log.error(`Failed at trademark ${i + 1}/${toProcess.length}: ${trademark.id}`);
+              log.error(`Failed at trademark ${i + 1}/${toProcess.length}: ${trademark!.id}`);
               return; // Exit early - too many browser crashes
             }
 
-            log.warn(`Browser crash detected at trademark ${trademark.id}, spawning fresh browser (restart ${browserRestarts + 1}/${maxBrowserRestarts})`);
+            log.warning(`Browser crash detected at trademark ${trademark!.id}, spawning fresh browser (restart ${browserRestarts + 1}/${maxBrowserRestarts})`);
 
             try {
               const { page: newPage } = await this.createFreshBrowser();
               currentPage = newPage;
               currentXsrfToken = await this.getXsrfToken(currentPage);
               browserRestarts++;
-              log.info(`Browser recovered successfully, retrying trademark ${trademark.id}`);
+              log.info(`Browser recovered successfully, retrying trademark ${trademark!.id}`);
               // Don't increment retries for browser recovery - we want to retry the same trademark
               retries--;
             } catch (recoveryErr) {
@@ -970,10 +975,10 @@ export class IMPIScraper {
               browserRestarts++;
             }
           } else if (retries <= maxRetries) {
-            log.warn(`Retry ${retries}/${maxRetries} for trademark ${trademark.id}: ${error.message}`);
+            log.warning(`Retry ${retries}/${maxRetries} for trademark ${trademark!.id}: ${error.message}`);
             await randomDelay(2000, 4000); // Wait before retry
           } else {
-            log.error(`Failed to process trademark ${trademark.id} after ${maxRetries} retries: ${error.message}`);
+            log.error(`Failed to process trademark ${trademark!.id} after ${maxRetries} retries: ${error.message}`);
           }
         }
       }
@@ -1110,7 +1115,7 @@ export class IMPIScraper {
         country: owner.Cry?.[0] || null
       }));
       if (data.owners.length > 0) {
-        data.ownerName = data.owners[0].name;
+        data.ownerName = data.owners[0]!.name;
       }
     }
 

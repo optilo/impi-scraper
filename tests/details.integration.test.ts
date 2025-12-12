@@ -105,7 +105,7 @@ describe('Full Details Integration', () => {
       expect(result.owners).toBeInstanceOf(Array);
       expect(result.owners!.length).toBeGreaterThan(0);
 
-      const owner = result.owners![0];
+      const owner = result.owners![0]!;
       expect(owner.name).toBeDefined();
       expect(owner.name.length).toBeGreaterThan(0);
       expect(owner.name).toBe(owner.name.toUpperCase()); // Company names are uppercase
@@ -130,7 +130,7 @@ describe('Full Details Integration', () => {
       expect(result.classes).toBeInstanceOf(Array);
       expect(result.classes!.length).toBeGreaterThan(0);
 
-      const cls = result.classes![0];
+      const cls = result.classes![0]!;
       expect(cls.classNumber).toBeDefined();
       expect(typeof cls.classNumber).toBe('number');
       expect(cls.classNumber).toBeGreaterThanOrEqual(1);
@@ -145,7 +145,7 @@ describe('Full Details Integration', () => {
       expect(result.priorities).toBeInstanceOf(Array);
       // Priorities are optional - may be empty
       if (result.priorities!.length > 0) {
-        const priority = result.priorities![0];
+        const priority = result.priorities![0]!;
         expect(priority.country).toBeDefined();
         expect(priority.applicationNumber).toBeDefined();
         if (priority.applicationDate) {
@@ -158,7 +158,7 @@ describe('Full Details Integration', () => {
       expect(result.history).toBeInstanceOf(Array);
       expect(result.history!.length).toBeGreaterThan(0);
 
-      const historyRecord = result.history![0];
+      const historyRecord = result.history![0]!;
       expect(historyRecord.procedureEntreeSheet).toBeDefined();
       expect(historyRecord.description).toBeDefined();
       expect(historyRecord.description.length).toBeGreaterThan(0);
@@ -186,7 +186,7 @@ describe('Full Details Integration', () => {
       expect(historyRecord.oficios).toBeInstanceOf(Array);
 
       if (historyRecord.oficios.length > 0) {
-        const oficio = historyRecord.oficios[0];
+        const oficio = historyRecord.oficios[0]!;
         expect(oficio.description).toBeDefined();
         expect(oficio.officeNumber).toBeDefined();
         expect(oficio.officeNumber).toMatch(/^\d+$/); // Office numbers are numeric
@@ -222,7 +222,7 @@ describe('Full Details Integration', () => {
     console.log(`   Avg per result: ${(results.performance.avgPerResultMs / 1000).toFixed(2)}s`);
 
     // Sample first result
-    const first = results.results[0];
+    const first = results.results[0]!;
     console.log(`\n📝 Sample Full Result:`);
     console.log(`   IMPI ID: ${first.impiId}`);
     console.log(`   Title: ${first.title}`);
@@ -244,11 +244,11 @@ describe('Full Details Integration', () => {
     // History summary
     console.log(`\n📜 History Records: ${first.history?.length || 0}`);
     if (first.history && first.history.length > 0) {
-      const hist = first.history[0];
+      const hist = first.history[0]!;
       console.log(`   First: ${hist.description} (${hist.startDate})`);
       if (hist.oficios.length > 0) {
         console.log(`   Oficios: ${hist.oficios.length}`);
-        console.log(`   First Oficio: ${hist.oficios[0].description} - ${hist.oficios[0].officeNumber}`);
+        console.log(`   First Oficio: ${hist.oficios[0]!.description} - ${hist.oficios[0]!.officeNumber}`);
       }
     }
   }, 180000);
