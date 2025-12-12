@@ -8,6 +8,7 @@ A TypeScript scraper for IMPI (Instituto Mexicano de la Propiedad Industrial) - 
 - **Human-like Behavior**: Simulates real user interactions (mouse movements, typing delays, scrolling)
 - **Anti-Detection**: Built-in measures to avoid bot detection
 - **Proxy Support**: Route requests through HTTP/SOCKS proxies for IP rotation
+- **IPFoxy Integration**: Built-in support for [IPFoxy](https://www.ipfoxy.com/) rotating proxy API
 - **External IP Detection**: Returns the IP address used for each request
 - **Full Details**: Option to fetch complete trademark information including owners, classes, and history
 - **CLI Interface**: Easy command-line access with multiple output formats
@@ -64,9 +65,6 @@ IMPI_PROXY_URL=http://proxy:8080 bun cli.ts search vitrum
 ```bash
 # Search trademarks
 bun cli.ts search <keyword> [options]
-
-# Test proxy connectivity
-bun cli.ts test-proxy [--proxy URL]
 
 # Fetch fresh proxies from IPFoxy
 bun cli.ts fetch-proxies [count]
@@ -174,52 +172,121 @@ const results2 = await searchTrademarks('vitrum');
 // Proxy will be automatically used from env var
 ```
 
-### Dynamic Proxy Rotation with IPFoxy
+## Proxy Rotation with IPFoxy
 
-For high-volume scraping, use the IPFoxy proxy provider to fetch fresh rotating IPs:
+For high-volume scraping, use the built-in [IPFoxy](https://www.ipfoxy.com/) integration to get fresh rotating IPs. Each request to the IPFoxy API returns proxy credentials with a unique session ID that routes through a different IP address.
 
-```typescript
-import { fetchProxiesFromEnv, searchTrademarks } from './src/index';
+### Quick Start
 
-// Fetch multiple proxy configs, each with a unique session ID (= different IP)
-const proxyResult = await fetchProxiesFromEnv(3);
+1. **Get an API token** from [IPFoxy](https://www.ipfoxy.com/)
 
-if (proxyResult) {
-  console.log(`Fetched ${proxyResult.count} proxies from ${proxyResult.provider}`);
-
-  // Run concurrent searches with different IPs
-  const searches = proxyResult.proxies.map(async (proxy, i) => {
-    const results = await searchTrademarks(`keyword${i}`, { proxy });
-    console.log(`Search ${i} used IP: ${results.metadata.externalIp}`);
-    return results;
-  });
-
-  const allResults = await Promise.all(searches);
-}
-```
-
-**Setup:**
-
-1. Get an API token from [IPFoxy](https://www.ipfoxy.com/)
-2. Create a `.env` file:
+2. **Create `.env` file** (copy from `.env.example`):
    ```bash
    IPFOXY_API_TOKEN=your_api_token_here
    ```
 
-**CLI Usage:**
+3. **Test it works:**
+   ```bash
+   bun cli.ts fetch-proxies 1
+   ```
+
+### How It Works
+
+IPFoxy uses session-based IP rotation. Each proxy returned has a unique session ID suffix (`_10000`, `_10001`, etc.) that routes through a different IP:
 
 ```bash
-# Test fetching proxies
-bun cli.ts fetch-proxies 3
+$ bun cli.ts fetch-proxies 3
 
-# Output:
-# Fetched 3 proxy(ies):
-# Proxy 1: Server: http://gate-sg.ipfoxy.io:58688, Username: customer-xxx-sessid-123_10000
-# Proxy 2: Server: http://gate-sg.ipfoxy.io:58688, Username: customer-xxx-sessid-123_10001
-# Proxy 3: Server: http://gate-sg.ipfoxy.io:58688, Username: customer-xxx-sessid-123_10002
+✅ Fetched 3 proxy(ies):
+Proxy 1: Server: http://gate-sg.ipfoxy.io:58688
+  Username: customer-xxx-sessid-123_10000  → IP: 1.2.3.4
+Proxy 2: Server: http://gate-sg.ipfoxy.io:58688
+  Username: customer-xxx-sessid-123_10001  → IP: 5.6.7.8
+Proxy 3: Server: http://gate-sg.ipfoxy.io:58688
+  Username: customer-xxx-sessid-123_10002  → IP: 9.10.11.12
 ```
 
-Each session ID suffix (`_10000`, `_10001`, etc.) routes through a different IP address, enabling concurrent scraping without rate limiting.
+### Programmatic Usage
+
+#### Basic: Single Proxy
+
+```typescript
+import { fetchProxiesFromEnv, searchTrademarks } from './src/index';
+
+// Fetch one proxy and use it
+const proxyResult = await fetchProxiesFromEnv(1);
+
+if (proxyResult) {
+  const proxy = proxyResult.proxies[0];
+  const results = await searchTrademarks('vitrum', { proxy });
+  console.log(`Used IP: ${results.metadata.externalIp}`);
+}
+```
+
+#### Advanced: Concurrent Searches with Different IPs
+
+```typescript
+import { fetchProxiesFromEnv, searchTrademarks } from './src/index';
+
+// Fetch 5 proxies (5 different IPs)
+const proxyResult = await fetchProxiesFromEnv(5);
+
+if (proxyResult) {
+  const keywords = ['nike', 'adidas', 'puma', 'reebok', 'converse'];
+
+  // Run all searches concurrently, each with a different IP
+  const searches = keywords.map((keyword, i) =>
+    searchTrademarks(keyword, { proxy: proxyResult.proxies[i] })
+  );
+
+  const allResults = await Promise.all(searches);
+
+  // Each search used a different IP
+  allResults.forEach((result, i) => {
+    console.log(`${keywords[i]}: ${result.results.length} results (IP: ${result.metadata.externalIp})`);
+  });
+}
+```
+
+#### Direct API Access
+
+```typescript
+import {
+  fetchIPFoxyProxies,
+  parseProxyProviderFromEnv,
+  type ProxyProviderConfig
+} from './src/index';
+
+// Option 1: Use env config
+const config = parseProxyProviderFromEnv();
+if (config) {
+  const result = await fetchIPFoxyProxies(config, 3);
+  console.log(result.proxies);
+}
+
+// Option 2: Manual config
+const manualConfig: ProxyProviderConfig = {
+  provider: 'ipfoxy',
+  apiToken: 'your-token-here',
+  host: 'gate-sg.ipfoxy.io',  // Optional, this is default
+  port: 58688,                 // Optional, this is default
+};
+const result = await fetchIPFoxyProxies(manualConfig, 3);
+```
+
+### Testing Proxy Connectivity
+
+Run the integration tests to verify proxy functionality:
+
+```bash
+# Test IPFoxy API + proxy connectivity
+bun test tests/proxy.integration.test.ts
+```
+
+This tests:
+- Fetching proxies from IPFoxy API
+- Unique session IDs for each proxy
+- Actual proxy connectivity (browser connects through proxy)
 
 ## Configuration Options
 
@@ -411,17 +478,16 @@ interface IMPIError extends Error {
 ## Testing
 
 ```bash
-# Run unit tests (fast)
+# Run unit tests (fast, no network)
 bun test src/
 
 # Run all integration tests (requires network, slow)
 bun test:integration
 
-# Run only search integration tests
-bun test:search
-
-# Run only details integration tests
-bun test:details
+# Run specific integration tests
+bun test:search     # Keyword search tests
+bun test:details    # Full details tests
+bun test:proxy      # IPFoxy API + proxy connectivity tests
 
 # Watch mode for development
 bun test:watch
@@ -504,6 +570,7 @@ git submodule add <repo-url> packages/impi-scraper
 | `bun test:integration` | Run all integration tests |
 | `bun test:search` | Run search integration tests |
 | `bun test:details` | Run details integration tests |
+| `bun test:proxy` | Run proxy/IPFoxy integration tests |
 
 ## Notes
 

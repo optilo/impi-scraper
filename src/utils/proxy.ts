@@ -102,10 +102,17 @@ export function parseProxyUrl(proxyUrl: string): ProxyConfig {
 
 /**
  * Merge proxy config from options and environment
- * Options take precedence over env vars
+ * - ProxyConfig object: use that proxy
+ * - null: explicitly disable proxy (no env fallback)
+ * - undefined: fall back to environment variables
  */
-export function resolveProxyConfig(optionsProxy?: ProxyConfig): ProxyConfig | undefined {
-  // Explicit options take precedence
+export function resolveProxyConfig(optionsProxy?: ProxyConfig | null): ProxyConfig | undefined {
+  // Explicit null means "no proxy" - don't fall back to env vars
+  if (optionsProxy === null) {
+    return undefined;
+  }
+
+  // Explicit proxy config takes precedence
   if (optionsProxy) {
     return optionsProxy;
   }
@@ -173,35 +180,33 @@ export async function testProxy(proxyConfig: ProxyConfig): Promise<string> {
     const context = await browser.newContext();
     const page = await context.newPage();
 
-    // First try a simple HTTP request to verify proxy works
-    try {
-      const response = await page.goto('http://httpbin.org/ip', { timeout: 15000 });
-      if (response && response.ok()) {
-        const text = await page.textContent('body');
-        if (text) {
-          try {
-            const data = JSON.parse(text);
-            if (data.origin) {
-              return data.origin.split(',')[0]!.trim();
+    // Try multiple IP detection services
+    const ipServices = [
+      { url: 'http://httpbin.org/ip', parser: (text: string) => JSON.parse(text).origin?.split(',')[0]?.trim() },
+      { url: 'http://ip-api.com/json', parser: (text: string) => JSON.parse(text).query },
+      { url: 'http://api.ipify.org', parser: (text: string) => text.trim() },
+      { url: 'https://api.ipify.org', parser: (text: string) => text.trim() },
+    ];
+
+    for (const service of ipServices) {
+      try {
+        const response = await page.goto(service.url, { timeout: 10000 });
+        if (response && response.ok()) {
+          const text = await page.textContent('body');
+          if (text) {
+            const ip = service.parser(text);
+            if (ip && /^\d+\.\d+\.\d+\.\d+$/.test(ip)) {
+              return ip;
             }
-          } catch {
-            // Not JSON, try other services
           }
         }
+      } catch {
+        // Try next service
+        continue;
       }
-    } catch (httpErr) {
-      // httpbin failed, try other services
-      console.log(`  (httpbin failed: ${(httpErr as Error).message.split('\n')[0]})`);
     }
 
-    // Try to fetch IP through proxy using API calls
-    const ip = await detectExternalIp(page);
-
-    if (!ip) {
-      throw new Error('Could not detect external IP through proxy - proxy may not support HTTPS or credentials may be invalid');
-    }
-
-    return ip;
+    throw new Error('Could not detect external IP through proxy - all IP detection services failed');
   } catch (err) {
     const message = (err as Error).message;
 

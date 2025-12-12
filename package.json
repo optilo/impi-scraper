@@ -1,6 +1,6 @@
 {
   "name": "@optilo/impi-scraper",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "IMPI (Mexican trademark office) scraper with keyword search and human-like interactions",
   "module": "src/index.ts",
   "main": "src/index.ts",
@@ -27,6 +27,7 @@
     "test:integration": "bun test tests/ --timeout 180000",
     "test:search": "bun test tests/search.integration.test.ts --timeout 120000",
     "test:details": "bun test tests/details.integration.test.ts --timeout 180000",
+    "test:proxy": "bun test tests/proxy.integration.test.ts --timeout 120000",
     "example:vitrum": "bun examples/search-vitrum.ts",
     "example:full": "bun examples/full-details.ts",
     "typecheck": "tsc --noEmit"

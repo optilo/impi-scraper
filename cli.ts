@@ -23,7 +23,7 @@
 
 import { parseArgs } from 'util';
 import { IMPIScraper } from './src/index';
-import { parseProxyUrl, parseProxyFromEnv, testProxy } from './src/utils/proxy';
+import { parseProxyUrl } from './src/utils/proxy';
 import { fetchProxiesFromEnv, parseProxyProviderFromEnv } from './src/utils/proxy-provider';
 import type { SearchResults, ProxyConfig } from './src/types';
 
@@ -32,12 +32,10 @@ IMPI Trademark Scraper CLI
 
 USAGE:
   bun cli.ts search <keyword> [options]
-  bun cli.ts test-proxy [--proxy URL]
   bun cli.ts fetch-proxies [count]
 
 COMMANDS:
   search <keyword>    Search trademarks by keyword
-  test-proxy          Test proxy connectivity and get external IP
   fetch-proxies       Fetch fresh proxy IPs from configured provider (IPFoxy)
 
 OPTIONS:
@@ -259,11 +257,6 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  if (command === 'test-proxy') {
-    await runTestProxy(options);
-    return;
-  }
-
   if (command === 'fetch-proxies') {
     const count = keyword ? parseInt(keyword, 10) : 1;
     await runFetchProxies(count);
@@ -330,38 +323,6 @@ async function runFetchProxies(count: number): Promise<void> {
       console.log('JSON output:');
       console.log(JSON.stringify(result.proxies, null, 2));
     }
-  } catch (error) {
-    console.error(`❌ ${(error as Error).message}`);
-    process.exit(1);
-  }
-}
-
-async function runTestProxy(options: CLIOptions): Promise<void> {
-  // Get proxy from CLI flag or environment
-  let proxy: ProxyConfig | undefined;
-  if (options.proxy) {
-    proxy = parseProxyUrl(options.proxy);
-  } else {
-    proxy = parseProxyFromEnv();
-  }
-
-  if (!proxy) {
-    console.error('Error: No proxy configured');
-    console.error('Provide --proxy URL or set IMPI_PROXY_URL environment variable');
-    process.exit(1);
-  }
-
-  console.log(`Testing proxy: ${proxy.server}`);
-  if (proxy.username) {
-    console.log(`  Username: ${proxy.username}`);
-  }
-  console.log('');
-
-  try {
-    console.log('Connecting to proxy...');
-    const externalIp = await testProxy(proxy);
-    console.log(`✅ Proxy is working!`);
-    console.log(`   External IP: ${externalIp}`);
   } catch (error) {
     console.error(`❌ ${(error as Error).message}`);
     process.exit(1);

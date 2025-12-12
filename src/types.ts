@@ -84,7 +84,7 @@ export interface IMPIScraperOptions {
   humanBehavior?: boolean;
   detailLevel?: 'basic' | 'full';
   maxResults?: number;
-  proxy?: ProxyConfig;           // Rotating proxy config for IP rotation
+  proxy?: ProxyConfig | null;    // null = no proxy, undefined = use env vars fallback
   detailTimeoutMs?: number;      // Timeout for fetching individual trademark details (default: 30000)
   browserTimeoutMs?: number;     // Timeout before refreshing browser (default: 300000 = 5min)
 }
