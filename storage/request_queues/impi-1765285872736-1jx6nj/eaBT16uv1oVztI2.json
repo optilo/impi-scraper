@@ -1,0 +1,9 @@
+{
+	"id": "eaBT16uv1oVztI2",
+	"json": "{\"id\":\"eaBT16uv1oVztI2\",\"url\":\"https://marcia.impi.gob.mx/marcas/search/quick\",\"loadedUrl\":\"https://marcia.impi.gob.mx/marcas/search/quick\",\"uniqueKey\":\"https://marcia.impi.gob.mx/marcas/search/quick\",\"method\":\"GET\",\"noRetry\":false,\"retryCount\":2,\"errorMessages\":[\"Error: requestHandler timed out after 60 seconds.\\n    at <anonymous> (/Users/rodcul/dev/optilo/my-app/node_modules/@apify/timeout/cjs/index.cjs:64:72)\",\"Error: Failed to intercept search results\\n    at performSearch (/Users/rodcul/dev/optilo/my-app/src/scraper.ts:233:17)\\n    at processTicksAndRejections (native:7:39)\"],\"headers\":{},\"userData\":{}}",
+	"method": "GET",
+	"orderNo": 1765286213622,
+	"retryCount": 2,
+	"uniqueKey": "https://marcia.impi.gob.mx/marcas/search/quick",
+	"url": "https://marcia.impi.gob.mx/marcas/search/quick"
+}

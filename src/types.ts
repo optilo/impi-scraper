@@ -147,6 +147,7 @@ export interface TrademarkResult {
 
   // Core identifiers
   impiId: string;
+  detailsUrl?: string;  // Direct link to trademark details page
   title: string;
   status: string;
   applicationNumber: string;

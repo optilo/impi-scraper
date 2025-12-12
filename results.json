@@ -1,0 +1,75 @@
+{
+  "metadata": {
+    "query": "eronex",
+    "executedAt": "2025-12-11T12:30:49.099Z",
+    "searchId": "66d9d381-a65a-4839-a458-72411b34d85a",
+    "searchUrl": "https://marcia.impi.gob.mx/marcas/search/result?s=66d9d381-a65a-4839-a458-72411b34d85a&m=l",
+    "totalResults": 3
+  },
+  "results": [
+    {
+      "query": "eronex",
+      "executedAt": "2025-12-11T12:30:49.099Z",
+      "searchId": "66d9d381-a65a-4839-a458-72411b34d85a",
+      "searchUrl": "https://marcia.impi.gob.mx/marcas/search/result?s=66d9d381-a65a-4839-a458-72411b34d85a&m=l",
+      "totalResults": 3,
+      "impiId": "RM199500225004",
+      "title": "ERONEX",
+      "status": "REGISTRADO",
+      "applicationNumber": "225004",
+      "registrationNumber": "496161",
+      "appType": "REGISTRO DE MARCA",
+      "applicationDate": "1995-02-20",
+      "registrationDate": null,
+      "publicationDate": null,
+      "expiryDate": "2005-02-20",
+      "cancellationDate": "2005-02-20",
+      "goodsAndServices": "",
+      "imageUrl": "https://prod.impi.static.tmv.io/lm/tmimage_trim96/MX/RM199500225004?fallback=ERONEX"
+    },
+    {
+      "query": "eronex",
+      "executedAt": "2025-12-11T12:30:49.099Z",
+      "searchId": "66d9d381-a65a-4839-a458-72411b34d85a",
+      "searchUrl": "https://marcia.impi.gob.mx/marcas/search/result?s=66d9d381-a65a-4839-a458-72411b34d85a&m=l",
+      "totalResults": 3,
+      "impiId": "RM202303073558",
+      "title": "ERONEX",
+      "status": "REGISTRADO",
+      "applicationNumber": "3073558",
+      "registrationNumber": "2691831",
+      "appType": "REGISTRO DE MARCA",
+      "applicationDate": "2023-12-11",
+      "registrationDate": null,
+      "publicationDate": "2024-01-03",
+      "expiryDate": "2034-04-22",
+      "cancellationDate": "2034-04-22",
+      "goodsAndServices": "",
+      "imageUrl": "https://prod.impi.static.tmv.io/lm/tmimage_trim96/MX/RM202303073558?fallback=ERONEX"
+    },
+    {
+      "query": "eronex",
+      "executedAt": "2025-12-11T12:30:49.099Z",
+      "searchId": "66d9d381-a65a-4839-a458-72411b34d85a",
+      "searchUrl": "https://marcia.impi.gob.mx/marcas/search/result?s=66d9d381-a65a-4839-a458-72411b34d85a&m=l",
+      "totalResults": 3,
+      "impiId": "RM202403086424",
+      "title": "ERONEX",
+      "status": "EN TRÁMITE",
+      "applicationNumber": "3086424",
+      "registrationNumber": null,
+      "appType": "REGISTRO DE MARCA",
+      "applicationDate": "2024-01-15",
+      "registrationDate": "2022-05-16",
+      "publicationDate": "2024-01-22",
+      "expiryDate": null,
+      "cancellationDate": null,
+      "goodsAndServices": "",
+      "imageUrl": "https://prod.impi.static.tmv.io/lm/tmimage_trim96/MX/RM202403086424?fallback=ERONEX"
+    }
+  ],
+  "performance": {
+    "durationMs": 10771,
+    "avgPerResultMs": 3590
+  }
+}

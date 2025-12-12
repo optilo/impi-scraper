@@ -208,6 +208,7 @@ interface SearchResults {
 interface TrademarkResult {
   // Core identifiers
   impiId: string;                // e.g., "RM200200532011"
+  detailsUrl: string;            // Direct link to IMPI details page
   title: string;
   status: string;                // "REGISTRADO", "EN TRÁMITE", etc.
   applicationNumber: string;

@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.2.1] - 2025-12-12
+
+### Added
+
+- **Details URL**: Each trademark result now includes `detailsUrl` - direct link to the IMPI details page
+  - Format: `https://marcia.impi.gob.mx/marcas/search/result?s={searchId}&m=d&id={impiId}`
+
+### Fixed
+
+- **Process Hang**: Fixed issue where CLI would hang after completing search with pagination
+  - Increased `retireBrowserAfterPageCount` to allow pagination to complete
+  - Added proper browser cleanup in finally block
+
 ## [1.2.0] - 2025-12-12
 
 ### Changed

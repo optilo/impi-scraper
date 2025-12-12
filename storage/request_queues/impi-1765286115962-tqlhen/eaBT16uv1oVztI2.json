@@ -1,0 +1,9 @@
+{
+	"id": "eaBT16uv1oVztI2",
+	"json": "{\"id\":\"eaBT16uv1oVztI2\",\"url\":\"https://marcia.impi.gob.mx/marcas/search/quick\",\"loadedUrl\":\"https://marcia.impi.gob.mx/marcas/search/quick\",\"uniqueKey\":\"https://marcia.impi.gob.mx/marcas/search/quick\",\"method\":\"GET\",\"noRetry\":false,\"retryCount\":3,\"errorMessages\":[\"Error: Failed to intercept search results\\n    at performSearch (/Users/rodcul/dev/optilo/my-app/src/scraper.ts:233:17)\\n    at processTicksAndRejections (native:7:39)\",\"Error: Failed to intercept search results\\n    at performSearch (/Users/rodcul/dev/optilo/my-app/src/scraper.ts:233:17)\\n    at processTicksAndRejections (native:7:39)\",\"Error: browserController.newPage() failed: EDFQzkiv1amX4PcMEhNej\\nCause:browserController.newPage() timed out..\\n    at _createPageForBrowser (/Users/rodcul/dev/optilo/my-app/node_modules/@crawlee/browser-pool/browser-pool.js:405:23)\\n    at processTicksAndRejections (native:7:39)\",\"Error: Failed to intercept search results\\n    at performSearch (/Users/rodcul/dev/optilo/my-app/src/scraper.ts:233:17)\\n    at processTicksAndRejections (native:7:39)\"],\"headers\":{},\"userData\":{},\"handledAt\":\"2025-12-09T13:16:34.670Z\"}",
+	"method": "GET",
+	"orderNo": null,
+	"retryCount": 3,
+	"uniqueKey": "https://marcia.impi.gob.mx/marcas/search/quick",
+	"url": "https://marcia.impi.gob.mx/marcas/search/quick"
+}

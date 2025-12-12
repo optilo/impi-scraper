@@ -1,0 +1,9 @@
+{
+	"id": "eaBT16uv1oVztI2",
+	"json": "{\"id\":\"eaBT16uv1oVztI2\",\"url\":\"https://marcia.impi.gob.mx/marcas/search/quick\",\"uniqueKey\":\"https://marcia.impi.gob.mx/marcas/search/quick\",\"method\":\"GET\",\"noRetry\":false,\"retryCount\":1,\"errorMessages\":[\"goto: net::ERR_ABORTED at https://marcia.impi.gob.mx/marcas/search/quick\\nCall log:\\n\\u001b[2m  - navigating to \\\"https://marcia.impi.gob.mx/marcas/search/quick\\\", waiting until \\\"load\\\"\\u001b[22m\\n\\n    at gotoExtended (/Users/rodcul/dev/optilo/my-app/node_modules/@crawlee/playwright/internals/utils/playwright-utils.js:126:29)\\n    at _navigationHandler (/Users/rodcul/dev/optilo/my-app/node_modules/@crawlee/playwright/internals/playwright-crawler.js:116:30)\\n    at _handleNavigation (/Users/rodcul/dev/optilo/my-app/node_modules/@crawlee/browser/internals/browser-crawler.js:334:52)\\n    at processTicksAndRejections (native:7:39)\"],\"headers\":{},\"userData\":{}}",
+	"method": "GET",
+	"orderNo": 1765285236667,
+	"retryCount": 1,
+	"uniqueKey": "https://marcia.impi.gob.mx/marcas/search/quick",
+	"url": "https://marcia.impi.gob.mx/marcas/search/quick"
+}

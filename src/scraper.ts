@@ -258,9 +258,11 @@ export class IMPIScraper {
       useSessionPool: false,
       requestHandlerTimeoutSecs: 600, // 10 minutes for full detail fetches
       navigationTimeoutSecs: 60, // 1 minute for page navigation
+      keepAlive: false, // Don't keep browsers alive after crawling
       browserPoolOptions: {
         useFingerprints: false,
-        retireBrowserAfterPageCount: 1, // Fresh browser for each request
+        retireBrowserAfterPageCount: 100, // Keep browser alive for pagination
+        closeInactiveBrowserAfterSecs: 10, // Close browsers when idle
       },
 
       launchContext: {
@@ -302,8 +304,21 @@ export class IMPIScraper {
 
     // Add unique key to prevent URL deduplication across runs
     const uniqueKey = `${IMPI_CONFIG.searchUrl}#${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    await crawler.run([{ url: IMPI_CONFIG.searchUrl, uniqueKey }]);
-    await crawler.teardown();
+
+    try {
+      await crawler.run([{ url: IMPI_CONFIG.searchUrl, uniqueKey }]);
+    } finally {
+      // Ensure crawler and browser pool are fully cleaned up
+      try {
+        await crawler.teardown();
+      } catch (e) {
+        log.debug(`Crawler teardown error: ${(e as Error).message}`);
+      }
+      // Force close any managed browsers from full detail fetches
+      await this.closeManagedBrowser();
+      // Give event loop a moment to clean up
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
 
     const duration = Date.now() - startTime;
 
@@ -553,9 +568,15 @@ export class IMPIScraper {
         goodsAndServices: '' // Not available in basic results
       })) || [];
 
+      // Build details URL from searchId and trademark ID
+      const detailsUrl = this.searchMetadata?.searchId
+        ? `https://marcia.impi.gob.mx/marcas/search/result?s=${this.searchMetadata.searchId}&m=d&id=${trademark.id}`
+        : undefined;
+
       this.results.push({
         ...this.searchMetadata!,
         impiId: trademark.id,
+        detailsUrl,
         title: trademark.title,
         status: trademark.status,
         ownerName,
@@ -752,9 +773,15 @@ export class IMPIScraper {
     const generalInfo = detailsData?.details?.generalInformation;
     const trademarkInfo = detailsData?.details?.trademark;
 
+    // Build details URL from searchId and trademark ID
+    const detailsUrl = this.searchMetadata?.searchId
+      ? `https://marcia.impi.gob.mx/marcas/search/result?s=${this.searchMetadata.searchId}&m=d&id=${trademark.id}`
+      : undefined;
+
     const data: TrademarkResult = {
       // Core identifiers
       impiId: trademark.id,
+      detailsUrl,
       title: trademark.title,
       status: detailsData?.result?.status || trademark.status,
       applicationNumber: trademark.applicationNumber,
