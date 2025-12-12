@@ -14,33 +14,9 @@ export function randomDelay(minMs: number, maxMs: number): Promise<void> {
 
 /**
  * Add human-like behavior to a Playwright page
+ * Lightweight version - just sets viewport, no blocking delays
  */
 export async function addHumanBehavior(page: Page): Promise<void> {
-  // Add random mouse movements occasionally
-  await page.evaluate(() => {
-    let moveCount = 0;
-    const maxMoves = Math.floor(Math.random() * 3) + 1;
-
-    const interval = setInterval(() => {
-      if (moveCount >= maxMoves) {
-        clearInterval(interval);
-        return;
-      }
-
-      const x = Math.floor(Math.random() * window.innerWidth);
-      const y = Math.floor(Math.random() * window.innerHeight);
-
-      const event = new MouseEvent('mousemove', {
-        clientX: x,
-        clientY: y,
-        bubbles: true
-      });
-
-      document.dispatchEvent(event);
-      moveCount++;
-    }, Math.random() * 2000 + 1000);
-  });
-
   // Random viewport size (realistic desktop resolutions)
   const viewports = [
     { width: 1920, height: 1080 },

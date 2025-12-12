@@ -7,7 +7,7 @@ import { PlaywrightCrawler, log, Configuration } from 'crawlee';
 import { MemoryStorage } from '@crawlee/memory-storage';
 import type { Page, Browser, BrowserContext } from 'playwright';
 import { chromium } from 'playwright';
-import { addHumanBehavior, randomDelay, smoothMouseMove } from './utils/human-behavior';
+import { addHumanBehavior, randomDelay } from './utils/human-behavior';
 import { parseDate } from './utils/data';
 import { detectExternalIp, resolveProxyConfig } from './utils/proxy';
 import {
@@ -114,7 +114,7 @@ export class IMPIScraper {
       rateLimitMs: 2000,
       maxConcurrency: 1,
       maxRetries: 3,
-      humanBehavior: true,
+      humanBehavior: false,
       detailLevel: 'basic',
       maxResults: 0, // 0 = no limit
       detailTimeoutMs: 30000, // 30 seconds per detail fetch
@@ -197,18 +197,11 @@ export class IMPIScraper {
   }
 
   /**
-   * Check if browser needs refresh (timeout or crash)
+   * Check if browser needs refresh (only on crash, not timeout)
    */
   private browserNeedsRefresh(): boolean {
-    if (!this.managedBrowser || !this.managedPage) return true;
-
-    const elapsed = Date.now() - this.browserStartTime;
-    if (elapsed > this.options.browserTimeoutMs) {
-      log.info(`Browser timeout reached (${Math.round(elapsed / 1000)}s), will refresh`);
-      return true;
-    }
-
-    return false;
+    // Only refresh if browser/page is null (crashed or closed)
+    return !this.managedBrowser || !this.managedPage;
   }
 
   /**
@@ -338,7 +331,7 @@ export class IMPIScraper {
     await page.goto(IMPI_CONFIG.searchUrl, { waitUntil: 'networkidle' });
 
     if (this.options.humanBehavior) {
-      await randomDelay(500, 1500);
+      await randomDelay(200, 500);
     }
 
     // Check for blocking indicators before proceeding
@@ -400,7 +393,7 @@ export class IMPIScraper {
     await page.goto(IMPI_CONFIG.searchUrl);
 
     if (this.options.humanBehavior) {
-      await randomDelay(800, 1500);
+      await randomDelay(300, 600);
     }
 
     // Check for blocking before interacting
@@ -428,28 +421,16 @@ export class IMPIScraper {
       );
     }
 
-    // Move mouse to input (human-like)
-    if (this.options.humanBehavior) {
-      const box = await searchInput.boundingBox();
-      if (box) {
-        await smoothMouseMove(page, box.x + box.width / 2, box.y + box.height / 2);
-        await randomDelay(200, 500);
-      }
-    }
-
     await searchInput.click();
-    await randomDelay(100, 300);
 
-    // Type query character by character (human-like)
+    // Type query - slightly slower if humanBehavior enabled
     if (this.options.humanBehavior) {
-      for (const char of query) {
-        await searchInput.type(char, { delay: Math.random() * 100 + 50 });
-      }
+      await searchInput.type(query, { delay: 30 }); // ~30ms per char
     } else {
       await searchInput.fill(query);
     }
 
-    await randomDelay(300, 700);
+    await randomDelay(100, 300);
 
     // Submit search
     await searchInput.press('Enter');
@@ -475,7 +456,7 @@ export class IMPIScraper {
 
     // Also wait for page to settle
     await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
-    await randomDelay(500, 1000);
+    await randomDelay(200, 400);
 
     // Extract search ID from URL
     const currentUrl = page.url();
@@ -627,10 +608,10 @@ export class IMPIScraper {
         await randomDelay(this.options.rateLimitMs, this.options.rateLimitMs + 1000);
       }
 
-      // Check if browser needs refresh (timeout)
+      // Check if browser needs refresh (only if crashed/closed)
       if (this.browserNeedsRefresh() && browserRestarts < maxBrowserRestarts) {
         try {
-          log.info(`Refreshing browser before trademark ${i + 1}/${toProcess.length}`);
+          log.info(`Browser needs recovery before trademark ${i + 1}/${toProcess.length}`);
           const { page: newPage } = await this.createFreshBrowser();
           currentPage = newPage;
           currentXsrfToken = await this.getXsrfToken(currentPage);

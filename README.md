@@ -46,8 +46,8 @@ bun cli.ts search nike --format summary
 # Show browser window (useful for debugging)
 bun cli.ts search vitrum --visible
 
-# Faster search (disables human-like delays)
-bun cli.ts search vitrum --no-human
+# Enable human-like behavior (slower but less detectable)
+bun cli.ts search vitrum --human
 
 # Limit results
 bun cli.ts search nike --limit 5
@@ -66,7 +66,7 @@ IMPI_PROXY_URL=http://proxy:8080 bun cli.ts search vitrum
 | `--full` | `-f` | Fetch full details (owners, classes, history) |
 | `--output FILE` | `-o` | Output to JSON file |
 | `--visible` | `-v` | Show browser window |
-| `--no-human` | | Disable human-like behavior (faster) |
+| `--human` | | Enable human-like behavior (slower) |
 | `--limit NUM` | `-l` | Limit number of results |
 | `--format` | | Output format: json, table, summary |
 | `--proxy URL` | `-p` | Proxy server URL |
@@ -166,7 +166,7 @@ const results2 = await searchTrademarks('vitrum');
 | `rateLimitMs` | number | `2000` | Milliseconds between requests |
 | `maxConcurrency` | number | `1` | Max concurrent requests |
 | `maxRetries` | number | `3` | Max retries on failure |
-| `humanBehavior` | boolean | `true` | Enable human-like interactions |
+| `humanBehavior` | boolean | `false` | Enable human-like interactions |
 | `detailLevel` | 'basic' \| 'full' | `'basic'` | Level of detail to fetch |
 | `proxy` | ProxyConfig | `undefined` | Proxy configuration (see below) |
 

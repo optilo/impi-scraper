@@ -39,7 +39,7 @@ OPTIONS:
   --full, -f          Fetch full details (owners, classes, history)
   --output, -o FILE   Output to JSON file (default: prints to stdout)
   --visible, -v       Show browser window
-  --no-human          Disable human-like behavior (faster but more detectable)
+  --human             Enable human-like behavior (slower but less detectable)
   --limit, -l NUM     Limit results to process
   --format FORMAT     Output format: json, table, summary (default: json)
   --proxy URL         Proxy server URL (e.g., http://user:pass@host:port)
@@ -58,7 +58,7 @@ EXAMPLES:
   bun cli.ts search "coca cola" --full -o coca-cola.json
 
   # Quick search with visible browser, limited results
-  bun cli.ts search nike --visible --limit 5 --no-human
+  bun cli.ts search nike --visible --limit 5
 
   # Table format output
   bun cli.ts search vitrum --format table
@@ -88,8 +88,7 @@ function parseCliArgs(): { command: string; keyword: string; options: CLIOptions
       full: { type: 'boolean', short: 'f', default: false },
       output: { type: 'string', short: 'o' },
       visible: { type: 'boolean', short: 'v', default: false },
-      human: { type: 'boolean', default: true },
-      'no-human': { type: 'boolean', default: false },
+      human: { type: 'boolean', default: false },
       limit: { type: 'string', short: 'l' },
       format: { type: 'string', default: 'json' },
       proxy: { type: 'string', short: 'p' },
@@ -108,7 +107,7 @@ function parseCliArgs(): { command: string; keyword: string; options: CLIOptions
       full: values.full as boolean,
       output: values.output as string | undefined,
       visible: values.visible as boolean,
-      human: values['no-human'] ? false : true,
+      human: values.human as boolean,
       limit: values.limit ? parseInt(values.limit as string, 10) : undefined,
       format: (values.format as 'json' | 'table' | 'summary') || 'json',
       proxy: values.proxy as string | undefined,

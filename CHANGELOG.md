@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.2.0] - 2025-12-12
+
+### Changed
+
+- **Human Behavior Optimization**: Significantly improved scraping performance
+  - Removed automatic browser refresh on timeout - now only refreshes on actual crash/detection
+  - Reduced all randomDelay values for faster execution
+  - Simplified `addHumanBehavior()` to just set random viewport (removed blocking mouse movements)
+
+- **Human Behavior Now Opt-In**: Changed `humanBehavior` default from `true` to `false`
+  - CLI now uses `--human` flag to enable (instead of `--no-human` to disable)
+  - Programmatic usage: `humanBehavior: true` to opt-in
+
 ## [1.1.0] - 2025-12-11
 
 ### Added
