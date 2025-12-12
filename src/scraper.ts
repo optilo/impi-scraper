@@ -222,6 +222,8 @@ export class IMPIScraper {
    * Search IMPI for trademarks by keyword
    */
   async search(query: string): Promise<SearchResults> {
+    log.debug(`Search options: detailLevel=${this.options.detailLevel}`);
+
     // For basic detail level, use simple direct search (no Crawlee overhead)
     if (this.options.detailLevel === 'basic') {
       return this.searchDirect(query);
@@ -312,6 +314,164 @@ export class IMPIScraper {
         durationMs: duration,
         avgPerResultMs: this.results.length > 0 ? Math.round(duration / this.results.length) : 0
       }
+    };
+  }
+
+  /**
+   * Batch search - process multiple queries with a single browser session
+   * Much more efficient for checking many domains
+   *
+   * @param queries - Array of search queries (keywords)
+   * @param onResult - Callback called after each search completes
+   * @returns Summary of batch operation
+   */
+  async searchBatch(
+    queries: string[],
+    onResult?: (query: string, result: SearchResults | null, error?: Error) => void | Promise<void>
+  ): Promise<{
+    successful: number;
+    failed: number;
+    results: Map<string, SearchResults>;
+    errors: Map<string, Error>;
+  }> {
+    log.info(`Starting batch search for ${queries.length} queries`);
+
+    const results = new Map<string, SearchResults>();
+    const errors = new Map<string, Error>();
+    let browser: Browser | null = null;
+    let context: BrowserContext | null = null;
+    let page: Page | null = null;
+    let xsrfToken: string | null = null;
+
+    const startTime = Date.now();
+
+    try {
+      // Launch single browser for all searches
+      browser = await chromium.launch(this.getBrowserLaunchOptions());
+      context = await browser.newContext({
+        userAgent: IMPI_CONFIG.userAgent,
+      });
+      page = await context.newPage();
+
+      if (this.options.humanBehavior) {
+        await addHumanBehavior(page);
+      }
+
+      // Get initial XSRF token
+      xsrfToken = await this.getXsrfToken(page, false);
+
+      // Process each query
+      for (let i = 0; i < queries.length; i++) {
+        const query = queries[i];
+        log.info(`[${i + 1}/${queries.length}] Searching: "${query}"`);
+
+        try {
+          // Reset state for this search
+          this.results = [];
+          this.searchMetadata = {
+            query,
+            executedAt: new Date().toISOString(),
+            searchId: null,
+            searchUrl: null,
+            externalIp: null
+          };
+
+          // Perform search (page should already be on search URL or we navigate)
+          const searchResults = await this.performSearch(page!, query, xsrfToken!, true);
+
+          this.searchMetadata.searchId = searchResults.searchId || null;
+          this.searchMetadata.searchUrl = searchResults.searchUrl || null;
+          this.searchMetadata.totalResults = searchResults.totalResults;
+
+          // Process basic results
+          await this.processBasicResults(searchResults.resultPage);
+
+          const result: SearchResults = {
+            metadata: this.searchMetadata,
+            results: this.results,
+            performance: {
+              durationMs: 0,
+              avgPerResultMs: 0
+            }
+          };
+
+          results.set(query, result);
+
+          // Callback with result
+          if (onResult) {
+            await onResult(query, result);
+          }
+
+          // Small delay between searches
+          if (i < queries.length - 1) {
+            await randomDelay(this.options.rateLimitMs, this.options.rateLimitMs + 1000);
+          }
+
+        } catch (err) {
+          const error = err as Error;
+          errors.set(query, error);
+          log.error(`Error searching "${query}": ${error.message}`);
+
+          // Callback with error
+          if (onResult) {
+            await onResult(query, null, error);
+          }
+
+          // Check if we need to restart browser (blocked/rate limited)
+          const isBlocked = error.message.includes('BLOCKED') ||
+                           error.message.includes('RATE_LIMITED') ||
+                           error.message.includes('CAPTCHA');
+
+          if (isBlocked && this.options.proxy) {
+            log.info('Blocked - restarting browser with new proxy connection...');
+            try {
+              await page?.close().catch(() => {});
+              await context?.close().catch(() => {});
+              await browser?.close().catch(() => {});
+
+              // Wait before retry
+              await randomDelay(30000, 60000);
+
+              // Restart browser (gets new IP from rotating proxy)
+              browser = await chromium.launch(this.getBrowserLaunchOptions());
+              context = await browser.newContext({
+                userAgent: IMPI_CONFIG.userAgent,
+              });
+              page = await context.newPage();
+
+              if (this.options.humanBehavior) {
+                await addHumanBehavior(page);
+              }
+
+              xsrfToken = await this.getXsrfToken(page, false);
+              log.info('Browser restarted successfully');
+            } catch (restartErr) {
+              log.error(`Failed to restart browser: ${(restartErr as Error).message}`);
+              break; // Exit batch on browser restart failure
+            }
+          }
+        }
+      }
+
+    } finally {
+      // Clean up browser
+      try {
+        await page?.close().catch(() => {});
+        await context?.close().catch(() => {});
+        await browser?.close().catch(() => {});
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
+
+    const duration = Date.now() - startTime;
+    log.info(`Batch search completed in ${(duration / 1000).toFixed(1)}s: ${results.size} successful, ${errors.size} failed`);
+
+    return {
+      successful: results.size,
+      failed: errors.size,
+      results,
+      errors
     };
   }
 
