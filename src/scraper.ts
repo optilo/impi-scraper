@@ -222,7 +222,104 @@ export class IMPIScraper {
    * Search IMPI for trademarks by keyword
    */
   async search(query: string): Promise<SearchResults> {
-    log.info(`Starting IMPI search for: "${query}"`);
+    // For basic detail level, use simple direct search (no Crawlee overhead)
+    if (this.options.detailLevel === 'basic') {
+      return this.searchDirect(query);
+    }
+
+    // For full details, use Crawlee-based search
+    return this.searchWithCrawlee(query);
+  }
+
+  /**
+   * Simple direct search using Playwright only (no Crawlee)
+   * Much faster and simpler for basic searches
+   */
+  private async searchDirect(query: string): Promise<SearchResults> {
+    log.info(`Starting IMPI search for: "${query}" (direct mode)`);
+    if (this.options.proxy) {
+      log.info(`Using proxy: ${this.options.proxy.server}`);
+    }
+
+    const startTime = Date.now();
+    this.results = [];
+    this.searchMetadata = {
+      query,
+      executedAt: new Date().toISOString(),
+      searchId: null,
+      searchUrl: null,
+      externalIp: null
+    };
+
+    let browser: Browser | null = null;
+
+    try {
+      // Launch single browser
+      browser = await chromium.launch(this.getBrowserLaunchOptions());
+      const context = await browser.newContext({
+        userAgent: IMPI_CONFIG.userAgent,
+      });
+      const page = await context.newPage();
+
+      // Detect external IP if proxy configured
+      if (this.options.proxy) {
+        try {
+          const externalIp = await detectExternalIp(page);
+          this.searchMetadata.externalIp = externalIp;
+          if (externalIp) {
+            log.info(`External IP: ${externalIp}`);
+          }
+        } catch (ipErr) {
+          log.debug(`Could not detect external IP: ${(ipErr as Error).message}`);
+        }
+      }
+
+      if (this.options.humanBehavior) {
+        await addHumanBehavior(page);
+      }
+
+      // Navigate once and get token
+      const xsrfToken = await this.getXsrfToken(page, false);
+
+      // Perform search (page is already on search URL from getXsrfToken)
+      const searchResults = await this.performSearch(page, query, xsrfToken, true);
+
+      this.searchMetadata.searchId = searchResults.searchId || null;
+      this.searchMetadata.searchUrl = searchResults.searchUrl || null;
+      this.searchMetadata.totalResults = searchResults.totalResults;
+
+      // Process basic results
+      await this.processBasicResults(searchResults.resultPage);
+
+    } finally {
+      // Clean up
+      if (browser) {
+        await browser.close().catch(() => {});
+      }
+    }
+
+    const duration = Date.now() - startTime;
+
+    log.info(`Search completed in ${(duration / 1000).toFixed(2)}s`, {
+      totalResults: this.searchMetadata?.totalResults,
+      processed: this.results.length
+    });
+
+    return {
+      metadata: this.searchMetadata!,
+      results: this.results,
+      performance: {
+        durationMs: duration,
+        avgPerResultMs: this.results.length > 0 ? Math.round(duration / this.results.length) : 0
+      }
+    };
+  }
+
+  /**
+   * Full search using Crawlee (for detailed results with pagination)
+   */
+  private async searchWithCrawlee(query: string): Promise<SearchResults> {
+    log.info(`Starting IMPI search for: "${query}" (crawlee mode)`);
     if (this.options.proxy) {
       log.info(`Using proxy: ${this.options.proxy.server}`);
     }

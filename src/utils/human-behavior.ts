@@ -17,12 +17,11 @@ export function randomDelay(minMs: number, maxMs: number): Promise<void> {
  * Lightweight version - just sets viewport, no blocking delays
  */
 export async function addHumanBehavior(page: Page): Promise<void> {
-  // Random viewport size (realistic desktop resolutions)
+  // Use modest viewport sizes (not fullscreen)
   const viewports = [
-    { width: 1920, height: 1080 },
-    { width: 1440, height: 900 },
-    { width: 1536, height: 864 },
-    { width: 1366, height: 768 }
+    { width: 1280, height: 720 },
+    { width: 1024, height: 768 },
+    { width: 1200, height: 800 },
   ];
 
   const viewport = viewports[Math.floor(Math.random() * viewports.length)];
