@@ -402,9 +402,14 @@ export class IMPIScraper {
             await onResult(query, result);
           }
 
-          // Small delay between searches
+          // Navigate back to search page for next query (like pressing back button)
           if (i < queries.length - 1) {
-            await randomDelay(this.options.rateLimitMs, this.options.rateLimitMs + 1000);
+            await randomDelay(500, 1000);
+            await page!.goBack({ waitUntil: 'networkidle' }).catch(async () => {
+              // If back doesn't work, navigate directly
+              await page!.goto(IMPI_CONFIG.searchUrl, { waitUntil: 'networkidle' });
+            });
+            await randomDelay(this.options.rateLimitMs, this.options.rateLimitMs + 500);
           }
 
         } catch (err) {
@@ -421,6 +426,17 @@ export class IMPIScraper {
           const isBlocked = error.message.includes('BLOCKED') ||
                            error.message.includes('RATE_LIMITED') ||
                            error.message.includes('CAPTCHA');
+
+          if (!isBlocked && i < queries.length - 1) {
+            // Navigate back to search page for next query
+            try {
+              await randomDelay(500, 1000);
+              await page!.goto(IMPI_CONFIG.searchUrl, { waitUntil: 'networkidle' });
+              await randomDelay(1000, 2000);
+            } catch {
+              // Ignore navigation errors
+            }
+          }
 
           if (isBlocked && this.options.proxy) {
             log.info('Blocked - restarting browser with new proxy connection...');
