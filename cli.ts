@@ -23,7 +23,8 @@
 
 import { parseArgs } from 'util';
 import { IMPIScraper } from './src/index';
-import { parseProxyUrl } from './src/utils/proxy';
+import { parseProxyUrl, parseProxyFromEnv, testProxy } from './src/utils/proxy';
+import { fetchProxiesFromEnv, parseProxyProviderFromEnv } from './src/utils/proxy-provider';
 import type { SearchResults, ProxyConfig } from './src/types';
 
 const HELP = `
@@ -31,9 +32,13 @@ IMPI Trademark Scraper CLI
 
 USAGE:
   bun cli.ts search <keyword> [options]
+  bun cli.ts test-proxy [--proxy URL]
+  bun cli.ts fetch-proxies [count]
 
 COMMANDS:
   search <keyword>    Search trademarks by keyword
+  test-proxy          Test proxy connectivity and get external IP
+  fetch-proxies       Fetch fresh proxy IPs from configured provider (IPFoxy)
 
 OPTIONS:
   --full, -f          Fetch full details (owners, classes, history)
@@ -254,6 +259,17 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
+  if (command === 'test-proxy') {
+    await runTestProxy(options);
+    return;
+  }
+
+  if (command === 'fetch-proxies') {
+    const count = keyword ? parseInt(keyword, 10) : 1;
+    await runFetchProxies(count);
+    return;
+  }
+
   if (command !== 'search') {
     console.error(`Unknown command: ${command}`);
     console.error('Use --help for usage information');
@@ -270,6 +286,84 @@ async function main(): Promise<void> {
     await runSearch(keyword, options);
   } catch (error) {
     console.error(`Error: ${(error as Error).message}`);
+    process.exit(1);
+  }
+}
+
+async function runFetchProxies(count: number): Promise<void> {
+  const providerConfig = parseProxyProviderFromEnv();
+
+  if (!providerConfig) {
+    console.error('Error: No proxy provider configured');
+    console.error('Set IPFOXY_API_TOKEN environment variable');
+    console.error('See .env.example for configuration options');
+    process.exit(1);
+  }
+
+  console.log(`Fetching ${count} proxy(ies) from ${providerConfig.provider}...`);
+  console.log(`  Host: ${providerConfig.host || 'default'}`);
+  console.log(`  Port: ${providerConfig.port || 'default'}`);
+  console.log('');
+
+  try {
+    const result = await fetchProxiesFromEnv(count);
+
+    if (!result || result.count === 0) {
+      console.error('❌ No proxies returned from provider');
+      process.exit(1);
+    }
+
+    console.log(`✅ Fetched ${result.count} proxy(ies):\n`);
+
+    for (let i = 0; i < result.proxies.length; i++) {
+      const proxy = result.proxies[i]!;
+      console.log(`Proxy ${i + 1}:`);
+      console.log(`  Server: ${proxy.server}`);
+      if (proxy.username) {
+        console.log(`  Username: ${proxy.username}`);
+      }
+      console.log('');
+    }
+
+    // Output as JSON for scripting
+    if (count > 1) {
+      console.log('JSON output:');
+      console.log(JSON.stringify(result.proxies, null, 2));
+    }
+  } catch (error) {
+    console.error(`❌ ${(error as Error).message}`);
+    process.exit(1);
+  }
+}
+
+async function runTestProxy(options: CLIOptions): Promise<void> {
+  // Get proxy from CLI flag or environment
+  let proxy: ProxyConfig | undefined;
+  if (options.proxy) {
+    proxy = parseProxyUrl(options.proxy);
+  } else {
+    proxy = parseProxyFromEnv();
+  }
+
+  if (!proxy) {
+    console.error('Error: No proxy configured');
+    console.error('Provide --proxy URL or set IMPI_PROXY_URL environment variable');
+    process.exit(1);
+  }
+
+  console.log(`Testing proxy: ${proxy.server}`);
+  if (proxy.username) {
+    console.log(`  Username: ${proxy.username}`);
+  }
+  console.log('');
+
+  try {
+    console.log('Connecting to proxy...');
+    const externalIp = await testProxy(proxy);
+    console.log(`✅ Proxy is working!`);
+    console.log(`   External IP: ${externalIp}`);
+  } catch (error) {
+    console.error(`❌ ${(error as Error).message}`);
     process.exit(1);
   }
 }

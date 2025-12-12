@@ -23,7 +23,9 @@
 
 export { IMPIScraper } from './scraper';
 export { searchTrademarks } from './api';
-export { parseProxyUrl, parseProxyFromEnv, resolveProxyConfig } from './utils/proxy';
+export { parseProxyUrl, parseProxyFromEnv, resolveProxyConfig, testProxy, isProxyError, getProxyErrorMessage } from './utils/proxy';
+export { fetchProxies, fetchProxiesFromEnv, fetchIPFoxyProxies, parseProxyProviderFromEnv } from './utils/proxy-provider';
+export type { ProxyProviderConfig, ProxyProviderResult } from './utils/proxy-provider';
 export {
   // Error class
   IMPIError

@@ -59,6 +59,19 @@ bun cli.ts search vitrum --proxy http://user:pass@proxy.example.com:8080
 IMPI_PROXY_URL=http://proxy:8080 bun cli.ts search vitrum
 ```
 
+### CLI Commands
+
+```bash
+# Search trademarks
+bun cli.ts search <keyword> [options]
+
+# Test proxy connectivity
+bun cli.ts test-proxy [--proxy URL]
+
+# Fetch fresh proxies from IPFoxy
+bun cli.ts fetch-proxies [count]
+```
+
 ### CLI Options
 
 | Option | Short | Description |
@@ -76,10 +89,13 @@ IMPI_PROXY_URL=http://proxy:8080 bun cli.ts search vitrum
 
 | Variable | Description |
 |----------|-------------|
-| `IMPI_PROXY_URL` | Proxy URL (highest priority) |
-| `PROXY_URL` | Proxy URL (fallback) |
-| `HTTP_PROXY` | Proxy URL (fallback) |
-| `HTTPS_PROXY` | Proxy URL (fallback) |
+| `IPFOXY_API_TOKEN` | IPFoxy API token for dynamic proxy fetching |
+| `IMPI_PROXY_URL` | Static proxy URL (highest priority) |
+| `PROXY_URL` | Static proxy URL (fallback) |
+| `HTTP_PROXY` | Static proxy URL (fallback) |
+| `HTTPS_PROXY` | Static proxy URL (fallback) |
+
+See `.env.example` for detailed configuration options.
 
 ### Output Formats
 
@@ -157,6 +173,53 @@ console.log(`Search used IP: ${results.metadata.externalIp}`);
 const results2 = await searchTrademarks('vitrum');
 // Proxy will be automatically used from env var
 ```
+
+### Dynamic Proxy Rotation with IPFoxy
+
+For high-volume scraping, use the IPFoxy proxy provider to fetch fresh rotating IPs:
+
+```typescript
+import { fetchProxiesFromEnv, searchTrademarks } from './src/index';
+
+// Fetch multiple proxy configs, each with a unique session ID (= different IP)
+const proxyResult = await fetchProxiesFromEnv(3);
+
+if (proxyResult) {
+  console.log(`Fetched ${proxyResult.count} proxies from ${proxyResult.provider}`);
+
+  // Run concurrent searches with different IPs
+  const searches = proxyResult.proxies.map(async (proxy, i) => {
+    const results = await searchTrademarks(`keyword${i}`, { proxy });
+    console.log(`Search ${i} used IP: ${results.metadata.externalIp}`);
+    return results;
+  });
+
+  const allResults = await Promise.all(searches);
+}
+```
+
+**Setup:**
+
+1. Get an API token from [IPFoxy](https://www.ipfoxy.com/)
+2. Create a `.env` file:
+   ```bash
+   IPFOXY_API_TOKEN=your_api_token_here
+   ```
+
+**CLI Usage:**
+
+```bash
+# Test fetching proxies
+bun cli.ts fetch-proxies 3
+
+# Output:
+# Fetched 3 proxy(ies):
+# Proxy 1: Server: http://gate-sg.ipfoxy.io:58688, Username: customer-xxx-sessid-123_10000
+# Proxy 2: Server: http://gate-sg.ipfoxy.io:58688, Username: customer-xxx-sessid-123_10001
+# Proxy 3: Server: http://gate-sg.ipfoxy.io:58688, Username: customer-xxx-sessid-123_10002
+```
+
+Each session ID suffix (`_10000`, `_10001`, etc.) routes through a different IP address, enabling concurrent scraping without rate limiting.
 
 ## Configuration Options
 
@@ -381,7 +444,8 @@ impi-scraper/
 │       ├── data.ts           # Data parsing utilities
 │       ├── data.test.ts
 │       ├── proxy.ts          # Proxy configuration utilities
-│       └── proxy.test.ts
+│       ├── proxy.test.ts
+│       └── proxy-provider.ts # IPFoxy API integration for rotating proxies
 ├── tests/
 │   ├── search.integration.test.ts   # Keyword search tests
 │   ├── details.integration.test.ts  # Full details tests
