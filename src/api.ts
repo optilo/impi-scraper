@@ -754,3 +754,281 @@ export class IMPIApiClient {
     this.session = null;
   }
 }
+
+// ============================================================================
+// Concurrent Pool Implementation
+// ============================================================================
+
+export interface ConcurrentPoolOptions extends Omit<IMPIApiClientOptions, 'proxy'> {
+  /** Number of concurrent workers (default: 3) */
+  concurrency?: number;
+  /** Array of proxies - one per worker. If fewer proxies than workers, proxies will be reused */
+  proxies?: ProxyConfig[];
+}
+
+export interface ConcurrentSearchResult {
+  query: string;
+  results: SearchResults | null;
+  error?: Error;
+  workerId: number;
+  proxyUsed?: string;
+}
+
+/**
+ * Worker instance for concurrent processing
+ */
+interface Worker {
+  id: number;
+  client: IMPIApiClient;
+  proxy?: ProxyConfig;
+  busy: boolean;
+}
+
+/**
+ * Concurrent API Client Pool - Multiple workers with different proxies
+ *
+ * Usage:
+ * ```ts
+ * const pool = new IMPIConcurrentPool({
+ *   concurrency: 3,
+ *   proxies: [proxy1, proxy2, proxy3]
+ * });
+ *
+ * // Search multiple queries in parallel
+ * const results = await pool.searchMany(['nike', 'adidas', 'puma']);
+ *
+ * // Or process items with custom function
+ * const details = await pool.processMany(trademarkIds, async (client, id) => {
+ *   return client.getTrademarkDetails(id);
+ * });
+ *
+ * await pool.close();
+ * ```
+ */
+export class IMPIConcurrentPool {
+  private options: Required<Omit<ConcurrentPoolOptions, 'proxies'>> & { proxies: ProxyConfig[] };
+  private workers: Worker[] = [];
+  private initialized = false;
+
+  constructor(options: ConcurrentPoolOptions = {}) {
+    this.options = {
+      headless: true,
+      rateLimitMs: 2000,
+      maxConcurrency: 1,
+      maxRetries: 3,
+      humanBehavior: false,
+      detailLevel: 'basic',
+      maxResults: 0,
+      detailTimeoutMs: 30000,
+      browserTimeoutMs: 300000,
+      debug: false,
+      screenshotDir: './screenshots',
+      apiRateLimitMs: 500,
+      keepBrowserOpen: false,
+      tokenRefreshIntervalMs: 25 * 60 * 1000,
+      concurrency: 3,
+      proxies: [],
+      ...options,
+    };
+  }
+
+  /**
+   * Initialize all workers with their proxies
+   */
+  async init(): Promise<void> {
+    if (this.initialized) return;
+
+    const { concurrency, proxies, ...clientOptions } = this.options;
+
+    log.info(`Initializing ${concurrency} concurrent workers...`);
+
+    // Create workers with proxies (round-robin if fewer proxies than workers)
+    const workerPromises: Promise<Worker>[] = [];
+
+    for (let i = 0; i < concurrency; i++) {
+      const proxy = proxies.length > 0 ? proxies[i % proxies.length] : undefined;
+
+      const createWorker = async (): Promise<Worker> => {
+        const client = new IMPIApiClient({
+          ...clientOptions,
+          proxy,
+        });
+
+        // Initialize session for each worker
+        await client.initSession();
+
+        log.info(`Worker ${i + 1}/${concurrency} initialized${proxy ? ` (proxy: ${proxy.server})` : ''}`);
+
+        return {
+          id: i,
+          client,
+          proxy,
+          busy: false,
+        };
+      };
+
+      workerPromises.push(createWorker());
+    }
+
+    // Initialize all workers in parallel
+    this.workers = await Promise.all(workerPromises);
+    this.initialized = true;
+
+    log.info(`All ${concurrency} workers ready`);
+  }
+
+  /**
+   * Get an available worker (waits if all busy)
+   */
+  private async getAvailableWorker(): Promise<Worker> {
+    // Simple polling - find first available worker
+    while (true) {
+      const available = this.workers.find(w => !w.busy);
+      if (available) {
+        available.busy = true;
+        return available;
+      }
+      // Wait a bit before checking again
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+  }
+
+  /**
+   * Release a worker back to the pool
+   */
+  private releaseWorker(worker: Worker): void {
+    worker.busy = false;
+  }
+
+  /**
+   * Search multiple queries concurrently
+   */
+  async searchMany(queries: string[]): Promise<ConcurrentSearchResult[]> {
+    if (!this.initialized) {
+      await this.init();
+    }
+
+    log.info(`Starting concurrent search for ${queries.length} queries with ${this.workers.length} workers`);
+
+    const results: ConcurrentSearchResult[] = [];
+    const pending: Promise<void>[] = [];
+
+    for (const query of queries) {
+      const searchTask = async () => {
+        const worker = await this.getAvailableWorker();
+
+        try {
+          log.info(`[Worker ${worker.id}] Searching: "${query}"`);
+          const searchResults = await worker.client.search(query);
+
+          results.push({
+            query,
+            results: searchResults,
+            workerId: worker.id,
+            proxyUsed: worker.proxy?.server,
+          });
+
+          log.info(`[Worker ${worker.id}] ✓ "${query}": ${searchResults.metadata.totalResults} results`);
+        } catch (err) {
+          const error = err as Error;
+          log.error(`[Worker ${worker.id}] ✗ "${query}": ${error.message}`);
+
+          results.push({
+            query,
+            results: null,
+            error,
+            workerId: worker.id,
+            proxyUsed: worker.proxy?.server,
+          });
+        } finally {
+          this.releaseWorker(worker);
+        }
+      };
+
+      pending.push(searchTask());
+    }
+
+    // Wait for all searches to complete
+    await Promise.all(pending);
+
+    // Sort results by original query order
+    const queryOrder = new Map(queries.map((q, i) => [q, i]));
+    results.sort((a, b) => (queryOrder.get(a.query) ?? 0) - (queryOrder.get(b.query) ?? 0));
+
+    return results;
+  }
+
+  /**
+   * Process items with a custom function using the worker pool
+   */
+  async processMany<T, R>(
+    items: T[],
+    processor: (client: IMPIApiClient, item: T, workerId: number) => Promise<R>
+  ): Promise<Array<{ item: T; result: R | null; error?: Error; workerId: number }>> {
+    if (!this.initialized) {
+      await this.init();
+    }
+
+    const results: Array<{ item: T; result: R | null; error?: Error; workerId: number }> = [];
+    const pending: Promise<void>[] = [];
+
+    for (const item of items) {
+      const processTask = async () => {
+        const worker = await this.getAvailableWorker();
+
+        try {
+          const result = await processor(worker.client, item, worker.id);
+          results.push({ item, result, workerId: worker.id });
+        } catch (err) {
+          results.push({
+            item,
+            result: null,
+            error: err as Error,
+            workerId: worker.id,
+          });
+        } finally {
+          this.releaseWorker(worker);
+        }
+      };
+
+      pending.push(processTask());
+    }
+
+    await Promise.all(pending);
+    return results;
+  }
+
+  /**
+   * Get worker stats
+   */
+  getStats(): { total: number; busy: number; available: number } {
+    const busy = this.workers.filter(w => w.busy).length;
+    return {
+      total: this.workers.length,
+      busy,
+      available: this.workers.length - busy,
+    };
+  }
+
+  /**
+   * Close all workers and cleanup
+   */
+  async close(): Promise<void> {
+    log.info('Closing all workers...');
+
+    await Promise.all(
+      this.workers.map(async (worker) => {
+        try {
+          await worker.client.close();
+        } catch {
+          // Ignore cleanup errors
+        }
+      })
+    );
+
+    this.workers = [];
+    this.initialized = false;
+
+    log.info('All workers closed');
+  }
+}

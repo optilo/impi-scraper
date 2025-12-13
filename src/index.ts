@@ -32,8 +32,8 @@
  */
 
 // API mode (recommended - faster, uses browser only for session tokens)
-export { IMPIApiClient, searchTrademarks } from './api';
-export type { IMPIApiClientOptions } from './api';
+export { IMPIApiClient, IMPIConcurrentPool, searchTrademarks } from './api';
+export type { IMPIApiClientOptions, ConcurrentPoolOptions, ConcurrentSearchResult } from './api';
 
 // Browser mode (legacy - full browser control)
 export { IMPIScraper } from './scraper';

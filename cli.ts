@@ -22,9 +22,9 @@
  */
 
 import { parseArgs } from 'util';
-import { IMPIApiClient, IMPIScraper } from './src/index';
+import { IMPIApiClient, IMPIConcurrentPool, IMPIScraper } from './src/index';
 import { parseProxyUrl } from './src/utils/proxy';
-import { fetchProxiesFromEnv, parseProxyProviderFromEnv } from './src/utils/proxy-provider';
+import { fetchProxiesFromEnv, fetchProxies, parseProxyProviderFromEnv } from './src/utils/proxy-provider';
 import type { SearchResults, ProxyConfig } from './src/types';
 
 const HELP = `
@@ -32,11 +32,13 @@ IMPI Trademark Scraper CLI
 
 USAGE:
   bun cli.ts search <keyword> [options]
+  bun cli.ts search-many <keyword1> <keyword2> ... [options]
   bun cli.ts fetch-proxies [count]
 
 COMMANDS:
-  search <keyword>    Search trademarks by keyword
-  fetch-proxies       Fetch fresh proxy IPs from configured provider (IPFoxy)
+  search <keyword>         Search trademarks by keyword
+  search-many <keywords>   Search multiple keywords concurrently (with proxies)
+  fetch-proxies            Fetch fresh proxy IPs from configured provider (IPFoxy)
 
 OPTIONS:
   --full, -f          Fetch full details (owners, classes, history)
@@ -47,6 +49,7 @@ OPTIONS:
   --limit, -l NUM     Limit results to process
   --format FORMAT     Output format: json, table, summary (default: json)
   --proxy URL         Proxy server URL (e.g., http://user:pass@host:port)
+  --concurrency, -c   Number of concurrent workers (default: 3, requires IPFOXY_API_TOKEN)
   --debug, -d         Save screenshots on CAPTCHA/blocking detection (to ./screenshots)
   --rate-limit NUM    API rate limit in ms (default: 500 = 2 req/sec)
   --help, -h          Show this help
@@ -55,6 +58,7 @@ ENVIRONMENT VARIABLES:
   IMPI_PROXY_URL      Proxy URL (alternative to --proxy flag)
   PROXY_URL           Proxy URL (fallback)
   HTTP_PROXY          Proxy URL (fallback)
+  IPFOXY_API_TOKEN    IPFoxy API token for concurrent proxy rotation
 
 EXAMPLES:
   # Basic search
@@ -72,8 +76,8 @@ EXAMPLES:
   # Search with proxy
   bun cli.ts search vitrum --proxy http://user:pass@proxy.example.com:8080
 
-  # Using environment variable for proxy
-  IMPI_PROXY_URL=http://proxy:8080 bun cli.ts search vitrum
+  # Concurrent search with multiple proxies (requires IPFOXY_API_TOKEN)
+  bun cli.ts search-many nike adidas puma --concurrency 3
 
   # Debug mode (saves screenshots on CAPTCHA/blocking)
   bun cli.ts search vitrum --debug --visible
@@ -88,12 +92,13 @@ interface CLIOptions {
   limit?: number;
   format: 'json' | 'table' | 'summary';
   proxy?: string;
+  concurrency: number;
   debug: boolean;
   rateLimit: number;
   help: boolean;
 }
 
-function parseCliArgs(): { command: string; keyword: string; options: CLIOptions } {
+function parseCliArgs(): { command: string; keywords: string[]; options: CLIOptions } {
   const { values, positionals } = parseArgs({
     args: Bun.argv.slice(2),
     options: {
@@ -105,6 +110,7 @@ function parseCliArgs(): { command: string; keyword: string; options: CLIOptions
       limit: { type: 'string', short: 'l' },
       format: { type: 'string', default: 'json' },
       proxy: { type: 'string', short: 'p' },
+      concurrency: { type: 'string', short: 'c' },
       debug: { type: 'boolean', short: 'd', default: false },
       'rate-limit': { type: 'string', short: 'r' },
       help: { type: 'boolean', short: 'h', default: false },
@@ -113,11 +119,11 @@ function parseCliArgs(): { command: string; keyword: string; options: CLIOptions
   });
 
   const command = positionals[0] || '';
-  const keyword = positionals.slice(1).join(' ');
+  const keywords = positionals.slice(1);
 
   return {
     command,
-    keyword,
+    keywords,
     options: {
       full: values.full as boolean,
       output: values.output as string | undefined,
@@ -127,6 +133,7 @@ function parseCliArgs(): { command: string; keyword: string; options: CLIOptions
       limit: values.limit ? parseInt(values.limit as string, 10) : undefined,
       format: (values.format as 'json' | 'table' | 'summary') || 'json',
       proxy: values.proxy as string | undefined,
+      concurrency: values.concurrency ? parseInt(values.concurrency as string, 10) : 3,
       debug: values.debug as boolean,
       rateLimit: values['rate-limit'] ? parseInt(values['rate-limit'] as string, 10) : 500,
       help: values.help as boolean,
@@ -295,8 +302,111 @@ async function runSearch(keyword: string, options: CLIOptions): Promise<void> {
   }
 }
 
+async function runConcurrentSearch(keywords: string[], options: CLIOptions): Promise<void> {
+  const concurrency = options.concurrency;
+
+  console.error(`Concurrent search for ${keywords.length} keywords with ${concurrency} workers...`);
+  console.error(`Keywords: ${keywords.join(', ')}`);
+  console.error(`Details: ${options.full ? 'full' : 'basic'} | Rate limit: ${options.rateLimit}ms`);
+
+  // Fetch proxies from provider (one per worker)
+  const providerConfig = parseProxyProviderFromEnv();
+  let proxies: ProxyConfig[] = [];
+
+  if (providerConfig) {
+    console.error(`Fetching ${concurrency} proxies from ${providerConfig.provider}...`);
+    try {
+      const result = await fetchProxies(providerConfig, concurrency);
+      proxies = result.proxies;
+      console.error(`✓ Got ${proxies.length} proxies`);
+    } catch (err) {
+      console.error(`⚠ Failed to fetch proxies: ${(err as Error).message}`);
+      console.error('  Falling back to no proxy (all workers share same IP)');
+    }
+  } else {
+    console.error('⚠ No proxy provider configured (IPFOXY_API_TOKEN not set)');
+    console.error('  All workers will share the same IP');
+  }
+
+  console.error('');
+
+  // Create concurrent pool
+  const pool = new IMPIConcurrentPool({
+    concurrency,
+    proxies,
+    detailLevel: options.full ? 'full' : 'basic',
+    humanBehavior: options.human,
+    apiRateLimitMs: options.rateLimit,
+    maxResults: options.limit || 0,
+    debug: options.debug,
+  });
+
+  try {
+    const startTime = Date.now();
+    const results = await pool.searchMany(keywords);
+    const duration = Date.now() - startTime;
+
+    // Aggregate stats
+    const successful = results.filter(r => r.results !== null);
+    const failed = results.filter(r => r.error);
+    const totalResults = successful.reduce((sum, r) => sum + (r.results?.metadata.totalResults || 0), 0);
+    const totalProcessed = successful.reduce((sum, r) => sum + (r.results?.results.length || 0), 0);
+
+    console.error(`\n${'═'.repeat(60)}`);
+    console.error(`Concurrent Search Complete`);
+    console.error(`${'═'.repeat(60)}`);
+    console.error(`Keywords searched: ${keywords.length}`);
+    console.error(`Successful:        ${successful.length}`);
+    console.error(`Failed:            ${failed.length}`);
+    console.error(`Total results:     ${totalResults}`);
+    console.error(`Total processed:   ${totalProcessed}`);
+    console.error(`Duration:          ${(duration / 1000).toFixed(2)}s`);
+    console.error(`Throughput:        ${(keywords.length / (duration / 1000)).toFixed(2)} queries/sec`);
+    console.error(`${'═'.repeat(60)}`);
+
+    // Show per-query summary
+    console.error(`\nPer-query results:`);
+    for (const r of results) {
+      if (r.results) {
+        console.error(`  ✓ "${r.query}": ${r.results.metadata.totalResults} found, ${r.results.results.length} processed (worker ${r.workerId}${r.proxyUsed ? `, proxy: ${r.proxyUsed}` : ''})`);
+      } else {
+        console.error(`  ✗ "${r.query}": ${r.error?.message || 'unknown error'} (worker ${r.workerId})`);
+      }
+    }
+
+    // Output results
+    const output = JSON.stringify({
+      summary: {
+        keywords: keywords.length,
+        successful: successful.length,
+        failed: failed.length,
+        totalResults,
+        totalProcessed,
+        durationMs: duration,
+      },
+      results: results.map(r => ({
+        query: r.query,
+        workerId: r.workerId,
+        proxyUsed: r.proxyUsed,
+        success: r.results !== null,
+        error: r.error?.message,
+        data: r.results,
+      })),
+    }, null, 2);
+
+    if (options.output) {
+      await Bun.write(options.output, output);
+      console.error(`\nResults saved to: ${options.output}`);
+    } else {
+      console.log(output);
+    }
+  } finally {
+    await pool.close();
+  }
+}
+
 async function main(): Promise<void> {
-  const { command, keyword, options } = parseCliArgs();
+  const { command, keywords, options } = parseCliArgs();
 
   if (options.help || !command) {
     console.log(HELP);
@@ -304,8 +414,23 @@ async function main(): Promise<void> {
   }
 
   if (command === 'fetch-proxies') {
-    const count = keyword ? parseInt(keyword, 10) : 1;
+    const count = keywords[0] ? parseInt(keywords[0], 10) : 1;
     await runFetchProxies(count);
+    return;
+  }
+
+  if (command === 'search-many') {
+    if (keywords.length === 0) {
+      console.error('Error: at least one keyword is required');
+      console.error('Usage: bun cli.ts search-many <keyword1> <keyword2> ...');
+      process.exit(1);
+    }
+    try {
+      await runConcurrentSearch(keywords, options);
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exit(1);
+    }
     return;
   }
 
@@ -315,6 +440,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  const keyword = keywords.join(' ');
   if (!keyword) {
     console.error('Error: keyword is required');
     console.error('Usage: bun cli.ts search <keyword>');
