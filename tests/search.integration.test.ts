@@ -158,4 +158,40 @@ describe('Keyword Search Integration', () => {
     console.log(`   Application Date: ${first.applicationDate || 'N/A'}`);
     console.log(`   Classes: ${first.classes?.map(c => c.classNumber).join(', ') || 'N/A'}`);
   }, 120000);
+
+  test('handles "no results" gracefully without false CAPTCHA detection', async () => {
+    // Search for a term unlikely to have any results
+    // This should return 0 results, NOT throw a CAPTCHA error
+    const results = await searchTrademarks('impimarciaxyznonexistent123456', {
+      headless: true,
+      detailLevel: 'basic',
+      humanBehavior: false,
+      rateLimitMs: 1000
+    });
+
+    // Should return valid results object with 0 results
+    expect(results).toBeDefined();
+    expect(results.metadata).toBeDefined();
+    expect(results.metadata.query).toBe('impimarciaxyznonexistent123456');
+
+    // Verify executedAt is valid ISO datetime
+    expect(results.metadata.executedAt).toMatch(ISO_DATETIME_REGEX);
+
+    // Should have 0 total results
+    expect(results.metadata.totalResults).toBe(0);
+
+    // Results array should be empty
+    expect(results.results).toBeInstanceOf(Array);
+    expect(results.results.length).toBe(0);
+
+    // Performance metrics should still be present
+    expect(results.performance).toBeDefined();
+    expect(results.performance.durationMs).toBeGreaterThan(0);
+
+    console.log(`\n📊 No Results Search Test:`);
+    console.log(`   Query: "${results.metadata.query}"`);
+    console.log(`   Total found: ${results.metadata.totalResults}`);
+    console.log(`   Duration: ${(results.performance.durationMs / 1000).toFixed(2)}s`);
+    console.log(`   ✅ Correctly returned 0 results without CAPTCHA error`);
+  }, 60000);
 });

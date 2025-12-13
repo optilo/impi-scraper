@@ -62,14 +62,25 @@ function getErrorCodeFromStatus(status: number): IMPIErrorCode {
 
 /**
  * Check page content for CAPTCHA or block indicators
+ * Returns: { blocked, reason, isNoResults }
  */
-async function detectBlockingIndicators(page: Page): Promise<{ blocked: boolean; reason?: string }> {
+async function detectBlockingIndicators(page: Page): Promise<{ blocked: boolean; reason?: string; isNoResults?: boolean }> {
   const bodyText = await page.textContent('body').catch(() => '') || '';
   const lowerBody = bodyText.toLowerCase();
 
-  // Check for CAPTCHA
-  if (lowerBody.includes('captcha') || lowerBody.includes('verificación humana') ||
-      lowerBody.includes('robot') || lowerBody.includes('verify you are human')) {
+  // FIRST: Check for "no results" - this is NOT a block, don't confuse with CAPTCHA
+  if (lowerBody.includes('no hay resultados') ||
+      lowerBody.includes('no results') ||
+      lowerBody.includes('considera realizar una nueva búsqueda') ||
+      lowerBody.includes('otros criterios')) {
+    return { blocked: false, isNoResults: true };
+  }
+
+  // Check for CAPTCHA - be more specific to avoid false positives
+  if ((lowerBody.includes('captcha') && !lowerBody.includes('resultado')) ||
+      lowerBody.includes('verificación humana') ||
+      lowerBody.includes('verify you are human') ||
+      lowerBody.includes('i\'m not a robot')) {
     return { blocked: true, reason: 'CAPTCHA verification required' };
   }
 
@@ -87,7 +98,7 @@ async function detectBlockingIndicators(page: Page): Promise<{ blocked: boolean;
 
   // Check for maintenance
   if (lowerBody.includes('maintenance') || lowerBody.includes('mantenimiento') ||
-      lowerBody.includes('temporarily unavailable') || lowerBody.includes('temporalmente')) {
+      lowerBody.includes('temporarily unavailable')) {
     return { blocked: true, reason: 'Service temporarily unavailable' };
   }
 
@@ -119,9 +130,35 @@ export class IMPIScraper {
       maxResults: 0, // 0 = no limit
       detailTimeoutMs: 30000, // 30 seconds per detail fetch
       browserTimeoutMs: 300000, // 5 minutes before browser refresh
+      debug: false,
+      screenshotDir: './screenshots',
       ...options,
       proxy: resolvedProxy, // Use resolved proxy (options > env var)
     };
+  }
+
+  /**
+   * Save debug screenshot when blocking or errors occur
+   */
+  private async saveDebugScreenshot(page: Page, reason: string, query?: string): Promise<string | null> {
+    if (!this.options.debug) return null;
+
+    try {
+      const { mkdir } = await import('fs/promises');
+      await mkdir(this.options.screenshotDir, { recursive: true });
+
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const sanitizedQuery = query?.replace(/[^a-z0-9]/gi, '_').slice(0, 20) || 'unknown';
+      const sanitizedReason = reason.replace(/[^a-z0-9]/gi, '_').slice(0, 30);
+      const filename = `${this.options.screenshotDir}/${timestamp}_${sanitizedQuery}_${sanitizedReason}.png`;
+
+      await page.screenshot({ path: filename, fullPage: true });
+      log.info(`Debug screenshot saved: ${filename}`);
+      return filename;
+    } catch (err) {
+      log.warning(`Failed to save debug screenshot: ${(err as Error).message}`);
+      return null;
+    }
   }
 
   /**
@@ -403,13 +440,11 @@ export class IMPIScraper {
             await onResult(query, result);
           }
 
-          // Navigate back to search page for next query (like pressing back button)
+          // Navigate directly to search page for next query
+          // (don't use goBack - after pagination it may land on wrong page)
           if (i < queries.length - 1) {
             await randomDelay(500, 1000);
-            await page!.goBack({ waitUntil: 'networkidle' }).catch(async () => {
-              // If back doesn't work, navigate directly
-              await page!.goto(IMPI_CONFIG.searchUrl, { waitUntil: 'networkidle' });
-            });
+            await page!.goto(IMPI_CONFIG.searchUrl, { waitUntil: 'networkidle' });
             await randomDelay(this.options.rateLimitMs, this.options.rateLimitMs + 500);
           }
 
@@ -631,6 +666,7 @@ export class IMPIScraper {
     // Check for blocking indicators before proceeding
     const blockCheck = await detectBlockingIndicators(page);
     if (blockCheck.blocked) {
+      await this.saveDebugScreenshot(page, blockCheck.reason || 'blocked', 'xsrf_token');
       const isCaptcha = blockCheck.reason?.includes('CAPTCHA');
       throw createError(
         isCaptcha ? 'CAPTCHA_REQUIRED' : 'BLOCKED',
@@ -700,6 +736,7 @@ export class IMPIScraper {
     // Check for blocking before interacting
     const blockCheck = await detectBlockingIndicators(page);
     if (blockCheck.blocked) {
+      await this.saveDebugScreenshot(page, blockCheck.reason || 'blocked', query);
       const isCaptcha = blockCheck.reason?.includes('CAPTCHA');
       const isRateLimit = blockCheck.reason?.includes('Rate limit');
       throw createError(
@@ -767,23 +804,11 @@ export class IMPIScraper {
     // Check for results (type assertion needed because TypeScript doesn't track closure mutations)
     const hasResults = searchData !== null && (searchData as IMPISearchResponse).resultPage !== undefined;
     if (!hasResults) {
-      // Check for blocking indicators
+      // Check for blocking indicators (this also detects "no results" pages)
       const blockCheck = await detectBlockingIndicators(page);
-      if (blockCheck.blocked) {
-        const isCaptcha = blockCheck.reason?.includes('CAPTCHA');
-        const isRateLimit = blockCheck.reason?.includes('Rate limit');
-        throw createError(
-          isCaptcha ? 'CAPTCHA_REQUIRED' : isRateLimit ? 'RATE_LIMITED' : 'BLOCKED',
-          blockCheck.reason || 'Request blocked after search submission',
-          { url: currentUrl }
-        );
-      }
 
-      const noResultsText = await page.textContent('body').catch(() => '');
-      if (noResultsText?.includes('No hay resultados') ||
-          noResultsText?.includes('No results') ||
-          noResultsText?.includes('Considera realizar una nueva búsqueda') ||
-          noResultsText?.includes('otros criterios')) {
+      // Handle "no results" - this is NOT an error
+      if (blockCheck.isNoResults) {
         log.info('No results found for this search');
         return {
           resultPage: [],
@@ -793,11 +818,25 @@ export class IMPIScraper {
         };
       }
 
+      // Handle actual blocks
+      if (blockCheck.blocked) {
+        await this.saveDebugScreenshot(page, blockCheck.reason || 'blocked', query);
+        const isCaptcha = blockCheck.reason?.includes('CAPTCHA');
+        const isRateLimit = blockCheck.reason?.includes('Rate limit');
+        throw createError(
+          isCaptcha ? 'CAPTCHA_REQUIRED' : isRateLimit ? 'RATE_LIMITED' : 'BLOCKED',
+          blockCheck.reason || 'Request blocked after search submission',
+          { url: currentUrl }
+        );
+      }
+
       // If we had a timeout and still no data, throw the timeout error
       if (timeoutError) {
         throw timeoutError;
       }
 
+      // Unknown state - save debug screenshot
+      await this.saveDebugScreenshot(page, 'no_results_unknown', query);
       throw createError(
         'PARSE_ERROR',
         'Failed to intercept search results - response format may have changed',

@@ -22,7 +22,7 @@
  */
 
 import { parseArgs } from 'util';
-import { IMPIScraper } from './src/index';
+import { IMPIApiClient, IMPIScraper } from './src/index';
 import { parseProxyUrl } from './src/utils/proxy';
 import { fetchProxiesFromEnv, parseProxyProviderFromEnv } from './src/utils/proxy-provider';
 import type { SearchResults, ProxyConfig } from './src/types';
@@ -41,11 +41,14 @@ COMMANDS:
 OPTIONS:
   --full, -f          Fetch full details (owners, classes, history)
   --output, -o FILE   Output to JSON file (default: prints to stdout)
-  --visible, -v       Show browser window
+  --visible, -v       Show browser window (forces browser mode)
+  --browser           Force full browser mode (slower, more robust)
   --human             Enable human-like behavior (slower but less detectable)
   --limit, -l NUM     Limit results to process
   --format FORMAT     Output format: json, table, summary (default: json)
   --proxy URL         Proxy server URL (e.g., http://user:pass@host:port)
+  --debug, -d         Save screenshots on CAPTCHA/blocking detection (to ./screenshots)
+  --rate-limit NUM    API rate limit in ms (default: 500 = 2 req/sec)
   --help, -h          Show this help
 
 ENVIRONMENT VARIABLES:
@@ -71,16 +74,22 @@ EXAMPLES:
 
   # Using environment variable for proxy
   IMPI_PROXY_URL=http://proxy:8080 bun cli.ts search vitrum
+
+  # Debug mode (saves screenshots on CAPTCHA/blocking)
+  bun cli.ts search vitrum --debug --visible
 `;
 
 interface CLIOptions {
   full: boolean;
   output?: string;
   visible: boolean;
+  browser: boolean;
   human: boolean;
   limit?: number;
   format: 'json' | 'table' | 'summary';
   proxy?: string;
+  debug: boolean;
+  rateLimit: number;
   help: boolean;
 }
 
@@ -91,10 +100,13 @@ function parseCliArgs(): { command: string; keyword: string; options: CLIOptions
       full: { type: 'boolean', short: 'f', default: false },
       output: { type: 'string', short: 'o' },
       visible: { type: 'boolean', short: 'v', default: false },
+      browser: { type: 'boolean', default: false },
       human: { type: 'boolean', default: false },
       limit: { type: 'string', short: 'l' },
       format: { type: 'string', default: 'json' },
       proxy: { type: 'string', short: 'p' },
+      debug: { type: 'boolean', short: 'd', default: false },
+      'rate-limit': { type: 'string', short: 'r' },
       help: { type: 'boolean', short: 'h', default: false },
     },
     allowPositionals: true,
@@ -110,10 +122,13 @@ function parseCliArgs(): { command: string; keyword: string; options: CLIOptions
       full: values.full as boolean,
       output: values.output as string | undefined,
       visible: values.visible as boolean,
+      browser: values.browser as boolean,
       human: values.human as boolean,
       limit: values.limit ? parseInt(values.limit as string, 10) : undefined,
       format: (values.format as 'json' | 'table' | 'summary') || 'json',
       proxy: values.proxy as string | undefined,
+      debug: values.debug as boolean,
+      rateLimit: values['rate-limit'] ? parseInt(values['rate-limit'] as string, 10) : 500,
       help: values.help as boolean,
     },
   };
@@ -193,8 +208,12 @@ function formatSummary(results: SearchResults): string {
 }
 
 async function runSearch(keyword: string, options: CLIOptions): Promise<void> {
+  // Use browser mode if --visible or --browser flag is set
+  const useBrowserMode = options.visible || options.browser;
+  const mode = useBrowserMode ? 'browser' : 'api';
+
   console.error(`Searching IMPI for "${keyword}"...`);
-  console.error(`Mode: ${options.full ? 'full details' : 'basic'} | Browser: ${options.visible ? 'visible' : 'headless'} | Human behavior: ${options.human ? 'on' : 'off'}`);
+  console.error(`Mode: ${mode} | Details: ${options.full ? 'full' : 'basic'}${useBrowserMode ? ` | Browser: ${options.visible ? 'visible' : 'headless'}` : ''} | Human: ${options.human ? 'on' : 'off'}${options.debug ? ' | Debug: ON' : ''}`);
 
   // Parse proxy from CLI flag if provided
   let proxy: ProxyConfig | undefined;
@@ -204,17 +223,44 @@ async function runSearch(keyword: string, options: CLIOptions): Promise<void> {
   } else {
     console.error(`Proxy: from env or none`);
   }
+  if (!useBrowserMode) {
+    console.error(`Rate limit: ${options.rateLimit}ms (${(1000 / options.rateLimit).toFixed(1)} req/sec)`);
+  }
+  if (options.debug) {
+    console.error(`Screenshots will be saved to ./screenshots on errors`);
+  }
   console.error('');
 
-  const scraper = new IMPIScraper({
-    headless: !options.visible,
-    detailLevel: options.full ? 'full' : 'basic',
-    humanBehavior: options.human,
-    rateLimitMs: options.full ? 2500 : 2000,
-    proxy,
-  });
+  let results: SearchResults;
 
-  const results = await scraper.search(keyword);
+  if (useBrowserMode) {
+    // Legacy browser mode
+    const scraper = new IMPIScraper({
+      headless: !options.visible,
+      detailLevel: options.full ? 'full' : 'basic',
+      humanBehavior: options.human,
+      rateLimitMs: options.full ? 2500 : 2000,
+      proxy,
+      debug: options.debug,
+    });
+    results = await scraper.search(keyword);
+  } else {
+    // API mode (default - faster)
+    const client = new IMPIApiClient({
+      headless: true,
+      detailLevel: options.full ? 'full' : 'basic',
+      humanBehavior: options.human,
+      apiRateLimitMs: options.rateLimit,
+      maxResults: options.limit || 0,
+      proxy,
+      debug: options.debug,
+    });
+    try {
+      results = await client.search(keyword);
+    } finally {
+      await client.close();
+    }
+  }
 
   // Apply limit if specified
   if (options.limit && options.limit > 0) {

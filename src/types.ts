@@ -87,6 +87,8 @@ export interface IMPIScraperOptions {
   proxy?: ProxyConfig | null;    // null = no proxy, undefined = use env vars fallback
   detailTimeoutMs?: number;      // Timeout for fetching individual trademark details (default: 30000)
   browserTimeoutMs?: number;     // Timeout before refreshing browser (default: 300000 = 5min)
+  debug?: boolean;               // Enable debug mode: saves screenshots on errors/blocks
+  screenshotDir?: string;        // Directory for debug screenshots (default: ./screenshots)
 }
 
 export interface SearchMetadata {
