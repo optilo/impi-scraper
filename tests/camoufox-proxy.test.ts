@@ -90,11 +90,7 @@ describe('IMPIScraper auto-proxy default behavior', () => {
 
     // Try a simple search - this will trigger auto-proxy resolution
     try {
-      const results = await scraper.search('vitrum', {
-        headless: true,
-        detailLevel: 'basic',
-        maxResults: 1,
-      });
+      const results = await scraper.search('vitrum');
 
       expect(results).toBeDefined();
       expect(results.metadata).toBeDefined();
@@ -123,11 +119,7 @@ describe('IMPIScraper auto-proxy default behavior', () => {
     expect(scraper).toBeDefined();
 
     // Should work without proxy
-    const results = await scraper.search('vitrum', {
-      headless: true,
-      detailLevel: 'basic',
-      maxResults: 1,
-    });
+    const results = await scraper.search('vitrum');
 
     expect(results).toBeDefined();
     expect(results.metadata.query).toBe('vitrum');
@@ -142,11 +134,7 @@ describe('IMPIScraper auto-proxy default behavior', () => {
     });
 
     // This should auto-fetch from IPFoxy
-    const results = await scraper.search('vitrum', {
-      headless: true,
-      detailLevel: 'basic',
-      maxResults: 1,
-    });
+    const results = await scraper.search('vitrum');
 
     expect(results).toBeDefined();
     expect(results.metadata.query).toBe('vitrum');
@@ -218,11 +206,7 @@ describe('Camoufox integration verification', () => {
     });
 
     // Direct search should use Camoufox (not Playwright)
-    const results = await scraper.search('vitrum', {
-      headless: true,
-      detailLevel: 'basic',
-      maxResults: 1,
-    });
+    const results = await scraper.search('vitrum');
 
     expect(results).toBeDefined();
     expect(results.metadata.query).toBe('vitrum');

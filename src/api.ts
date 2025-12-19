@@ -166,8 +166,11 @@ export class IMPIApiClient {
       return;
     }
 
-    this.options.proxy = result.proxies[0];
-    log.info(`Using auto-fetched proxy: ${this.options.proxy.server}`);
+    const proxy = result.proxies[0];
+    if (proxy) {
+      this.options.proxy = proxy;
+      log.info(`Using auto-fetched proxy: ${this.options.proxy.server}`);
+    }
   }
 
   /**
@@ -194,12 +197,16 @@ export class IMPIApiClient {
       geoip: true,
       proxy: formattedProxy,
     });
+    if (!this.browser) {
+      throw new Error('Failed to create Camoufox browser');
+    }
     this.context = await this.browser.newContext({
       userAgent: IMPI_CONFIG.userAgent,
     });
     this.page = await this.context.newPage();
 
-    if (this.options.humanBehavior) {
+    if (this.options.humanBehavior && this.page) {
+      // @ts-expect-error - Playwright type compatibility between versions
       await addHumanBehavior(this.page);
     }
 
@@ -378,6 +385,9 @@ export class IMPIApiClient {
         geoip: true,
         proxy: formattedProxy,
       });
+      if (!this.browser) {
+        throw new Error('Failed to create Camoufox browser');
+      }
       this.context = await this.browser.newContext({
         userAgent: IMPI_CONFIG.userAgent,
       });
@@ -391,7 +401,8 @@ export class IMPIApiClient {
 
       this.page = await this.context.newPage();
 
-      if (this.options.humanBehavior) {
+      if (this.options.humanBehavior && this.page) {
+        // @ts-expect-error - Playwright type compatibility between versions
         await addHumanBehavior(this.page);
       }
     }

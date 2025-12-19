@@ -19,7 +19,10 @@ function bumpVersion(current: string, type: BumpType | string): string {
     return type;
   }
 
-  const [major, minor, patch] = current.split('.').map(Number);
+  const parts = current.split('.').map(Number);
+  const major = parts[0] ?? 0;
+  const minor = parts[1] ?? 0;
+  const patch = parts[2] ?? 0;
 
   switch (type) {
     case 'major':

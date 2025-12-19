@@ -4,7 +4,6 @@
 
 import type { Page } from 'playwright';
 import type { ProxyConfig } from '../types';
-import type { ProxyConfig } from '../types';
 
 /**
  * IP check services (in order of preference)

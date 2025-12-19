@@ -366,6 +366,7 @@ export class IMPIScraper {
       // Detect external IP if proxy configured
       if (this.options.proxy) {
         try {
+          // @ts-expect-error - Playwright type compatibility between Camoufox and Playwright versions
           const externalIp = await detectExternalIp(page);
           this.searchMetadata.externalIp = externalIp;
           if (externalIp) {
@@ -377,6 +378,7 @@ export class IMPIScraper {
       }
 
       if (this.options.humanBehavior) {
+        // @ts-expect-error - Playwright type compatibility between Camoufox and Playwright versions
         await addHumanBehavior(page);
       }
 
@@ -454,6 +456,7 @@ export class IMPIScraper {
       page = await context.newPage();
 
       if (this.options.humanBehavior) {
+        // @ts-expect-error - Playwright type compatibility between Camoufox and Playwright versions
         await addHumanBehavior(page);
       }
 
@@ -555,6 +558,7 @@ export class IMPIScraper {
               page = await context.newPage();
 
               if (this.options.humanBehavior) {
+                // @ts-expect-error - Playwright type compatibility between Camoufox and Playwright versions
                 await addHumanBehavior(page);
               }
 
@@ -660,7 +664,9 @@ export class IMPIScraper {
         }
 
         // Crawler already navigated to search URL, so skip redundant navigations
+        // @ts-expect-error - Playwright type compatibility between Camoufox and Playwright versions
         const xsrfToken = await self.getXsrfToken(page, true);
+        // @ts-expect-error - Playwright type compatibility between Camoufox and Playwright versions
         const searchResults = await self.performSearch(page, query, xsrfToken, true);
 
         self.searchMetadata!.searchId = searchResults.searchId || null;
@@ -670,6 +676,7 @@ export class IMPIScraper {
         if (self.options.detailLevel === 'basic') {
           await self.processBasicResults(searchResults.resultPage);
         } else {
+          // @ts-expect-error - Playwright type compatibility between Camoufox and Playwright versions
           await self.processFullResults(page, searchResults.resultPage, xsrfToken);
         }
       }
