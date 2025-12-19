@@ -30,7 +30,11 @@
     "test:proxy": "bun test tests/proxy.integration.test.ts --timeout 120000",
     "example:vitrum": "bun examples/search-vitrum.ts",
     "example:full": "bun examples/full-details.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "release": "bun scripts/release.ts",
+    "release:patch": "bun scripts/release.ts patch",
+    "release:minor": "bun scripts/release.ts minor",
+    "release:major": "bun scripts/release.ts major"
   },
   "keywords": [
     "impi",

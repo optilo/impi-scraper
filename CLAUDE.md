@@ -116,3 +116,34 @@ For more information, read the Bun API docs in `node_modules/bun-types/docs/**.m
 - You may stage changes with `git add`
 - Wait for user to do manual QA and verification before committing
 - Only commit when explicitly asked by the user
+
+## Releases
+
+When the user asks to create a release, use the release script:
+
+```bash
+# Patch release (bug fixes): 2.2.0 -> 2.2.1
+bun run release:patch
+
+# Minor release (new features): 2.2.0 -> 2.3.0
+bun run release:minor
+
+# Major release (breaking changes): 2.2.0 -> 3.0.0
+bun run release:major
+
+# Explicit version
+bun run release 2.5.0
+```
+
+The script will:
+1. Check for uncommitted changes (fails if dirty)
+2. Bump version in package.json
+3. Run tests and typecheck
+4. Commit with message "chore: release vX.Y.Z"
+5. Create git tag vX.Y.Z
+6. Push to origin (triggers GitHub Actions to create release)
+
+**Version guidelines**:
+- `patch`: Bug fixes, documentation updates, refactoring
+- `minor`: New features, non-breaking API additions
+- `major`: Breaking changes to existing API
