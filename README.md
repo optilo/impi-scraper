@@ -5,6 +5,8 @@ A TypeScript scraper for IMPI (Instituto Mexicano de la Propiedad Industrial) - 
 ## Features
 
 - **Keyword Search**: Search trademarks by keyword
+- **API Mode** (default): Fast direct API calls after session token extraction (10-50x faster)
+- **Concurrent Search**: Multiple workers with per-worker proxy rotation
 - **Human-like Behavior**: Simulates real user interactions (mouse movements, typing delays, scrolling)
 - **Anti-Detection**: Built-in measures to avoid bot detection
 - **Proxy Support**: Route requests through HTTP/SOCKS proxies for IP rotation
@@ -63,8 +65,11 @@ IMPI_PROXY_URL=http://proxy:8080 bun cli.ts search vitrum
 ### CLI Commands
 
 ```bash
-# Search trademarks
+# Search trademarks (single keyword)
 bun cli.ts search <keyword> [options]
+
+# Concurrent search (multiple keywords with multiple proxies)
+bun cli.ts search-many <keyword1> <keyword2> ... [options]
 
 # Fetch fresh proxies from IPFoxy
 bun cli.ts fetch-proxies [count]
@@ -76,11 +81,15 @@ bun cli.ts fetch-proxies [count]
 |--------|-------|-------------|
 | `--full` | `-f` | Fetch full details (owners, classes, history) |
 | `--output FILE` | `-o` | Output to JSON file |
-| `--visible` | `-v` | Show browser window |
+| `--visible` | `-v` | Show browser window (forces browser mode) |
+| `--browser` | | Force full browser mode (slower, more robust) |
 | `--human` | | Enable human-like behavior (slower) |
 | `--limit NUM` | `-l` | Limit number of results |
 | `--format` | | Output format: json, table, summary |
 | `--proxy URL` | `-p` | Proxy server URL |
+| `--concurrency NUM` | `-c` | Number of concurrent workers (default: 1) |
+| `--rate-limit NUM` | | API rate limit in ms (default: 500) |
+| `--debug` | `-d` | Save screenshots on CAPTCHA/blocking detection |
 | `--help` | `-h` | Show help |
 
 ### Environment Variables
@@ -110,6 +119,57 @@ bun cli.ts search vitrum --format table
 **Summary**: Human-readable summary
 ```bash
 bun cli.ts search vitrum --format summary
+```
+
+## Concurrent Search
+
+For high-volume searches, use `search-many` with multiple workers. Each worker gets its own proxy from IPFoxy:
+
+```bash
+# Search 5 keywords with 3 concurrent workers (fetches 3 proxies automatically)
+bun cli.ts search-many nike adidas puma reebok converse --concurrency 3
+
+# With full details
+bun cli.ts search-many nike adidas puma --concurrency 3 --full -o results.json
+```
+
+**Requirements:**
+- Set `IPFOXY_API_TOKEN` environment variable for proxy rotation
+- Each worker gets a unique IP from IPFoxy
+
+**How it works:**
+1. Fetches N proxies from IPFoxy (where N = concurrency)
+2. Initializes N browser sessions in parallel (one per proxy/IP)
+3. Distributes keywords across workers
+4. Returns aggregated results with per-query stats
+
+### Programmatic Concurrent Search
+
+```typescript
+import { IMPIConcurrentPool } from '@optilo/impi-scraper';
+import { fetchProxiesFromEnv } from '@optilo/impi-scraper';
+
+// Fetch 3 proxies (3 different IPs)
+const proxyResult = await fetchProxiesFromEnv(3);
+
+const pool = new IMPIConcurrentPool({
+  concurrency: 3,
+  proxies: proxyResult?.proxies || [],
+  detailLevel: 'basic',
+  apiRateLimitMs: 500,
+});
+
+const results = await pool.searchMany(['nike', 'adidas', 'puma', 'reebok', 'converse']);
+
+for (const r of results) {
+  if (r.results) {
+    console.log(`✓ ${r.query}: ${r.results.metadata.totalResults} results (worker ${r.workerId})`);
+  } else {
+    console.log(`✗ ${r.query}: ${r.error?.message}`);
+  }
+}
+
+await pool.close();
 ```
 
 ## Programmatic Usage

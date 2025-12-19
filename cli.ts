@@ -49,7 +49,7 @@ OPTIONS:
   --limit, -l NUM     Limit results to process
   --format FORMAT     Output format: json, table, summary (default: json)
   --proxy URL         Proxy server URL (e.g., http://user:pass@host:port)
-  --concurrency, -c   Number of concurrent workers (default: 3, requires IPFOXY_API_TOKEN)
+  --concurrency, -c   Number of concurrent workers (default: 1, requires IPFOXY_API_TOKEN)
   --debug, -d         Save screenshots on CAPTCHA/blocking detection (to ./screenshots)
   --rate-limit NUM    API rate limit in ms (default: 500 = 2 req/sec)
   --help, -h          Show this help
@@ -133,7 +133,7 @@ function parseCliArgs(): { command: string; keywords: string[]; options: CLIOpti
       limit: values.limit ? parseInt(values.limit as string, 10) : undefined,
       format: (values.format as 'json' | 'table' | 'summary') || 'json',
       proxy: values.proxy as string | undefined,
-      concurrency: values.concurrency ? parseInt(values.concurrency as string, 10) : 3,
+      concurrency: values.concurrency ? parseInt(values.concurrency as string, 10) : 1,
       debug: values.debug as boolean,
       rateLimit: values['rate-limit'] ? parseInt(values['rate-limit'] as string, 10) : 500,
       help: values.help as boolean,

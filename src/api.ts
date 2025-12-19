@@ -177,6 +177,11 @@ export class IMPIApiClient {
     // Extract session tokens from cookies
     const cookies = await this.context.cookies();
 
+    // Debug: log page URL and cookies
+    const currentUrl = this.page!.url();
+    log.debug(`Page URL after navigation: ${currentUrl}`);
+    log.debug(`Cookies found: ${cookies.map(c => c.name).join(', ') || 'none'}`);
+
     const xsrfCookie = cookies.find(c => c.name === 'XSRF-TOKEN');
     const jsessionCookie = cookies.find(c => c.name === 'JSESSIONID');
     const sessionCookie = cookies.find(c => c.name === 'SESSIONTOKEN');
@@ -187,9 +192,22 @@ export class IMPIApiClient {
       if (!jsessionCookie) missing.push('JSESSIONID');
       if (!sessionCookie) missing.push('SESSIONTOKEN');
 
+      // Check if we were blocked or got CAPTCHA
+      const pageContent = await this.page!.textContent('body').catch(() => '') || '';
+      const pageTitle = await this.page!.title().catch(() => '');
+
+      log.warning(`Page title: ${pageTitle}`);
+      log.warning(`Page content (first 500 chars): ${pageContent.substring(0, 500)}`);
+
+      if (pageContent.toLowerCase().includes('captcha') ||
+          pageContent.toLowerCase().includes('blocked') ||
+          pageContent.toLowerCase().includes('access denied')) {
+        throw createError('BLOCKED', `Access blocked or CAPTCHA detected via proxy`, { url: currentUrl });
+      }
+
       throw createError(
         'SESSION_EXPIRED',
-        `Failed to obtain session tokens. Missing: ${missing.join(', ')}`,
+        `Failed to obtain session tokens. Missing: ${missing.join(', ')}. URL: ${currentUrl}`,
         { url: IMPI_CONFIG.searchUrl }
       );
     }
@@ -826,7 +844,7 @@ export class IMPIConcurrentPool {
       apiRateLimitMs: 500,
       keepBrowserOpen: false,
       tokenRefreshIntervalMs: 25 * 60 * 1000,
-      concurrency: 3,
+      concurrency: 1,
       proxies: [],
       ...options,
     };

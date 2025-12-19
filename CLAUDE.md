@@ -109,3 +109,10 @@ bun --hot ./index.ts
 ```
 
 For more information, read the Bun API docs in `node_modules/bun-types/docs/**.mdx`.
+
+## Git Workflow
+
+**IMPORTANT**: Do NOT commit or push changes automatically.
+- You may stage changes with `git add`
+- Wait for user to do manual QA and verification before committing
+- Only commit when explicitly asked by the user
