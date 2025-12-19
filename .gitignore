@@ -41,3 +41,7 @@ storage/
 !package.json
 !tsconfig.json
 screenshots/
+
+# pnpm files (project uses bun)
+pnpm-lock.yaml
+pnpm-workspace.yaml
