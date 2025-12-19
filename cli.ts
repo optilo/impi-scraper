@@ -48,7 +48,7 @@ OPTIONS:
   --human             Enable human-like behavior (slower but less detectable)
   --limit, -l NUM     Limit results to process
   --format FORMAT     Output format: json, table, summary (default: json)
-  --proxy URL         Proxy server URL (e.g., http://user:pass@host:port)
+  --proxy [URL]       Use proxy. Without URL: auto-fetch from IPFoxy. With URL: use that proxy
   --concurrency, -c   Number of concurrent workers (default: 1, requires IPFOXY_API_TOKEN)
   --debug, -d         Save screenshots on CAPTCHA/blocking detection (to ./screenshots)
   --rate-limit NUM    API rate limit in ms (default: 500 = 2 req/sec)
@@ -73,7 +73,10 @@ EXAMPLES:
   # Table format output
   bun cli.ts search vitrum --format table
 
-  # Search with proxy
+  # Search with auto-fetched proxy (requires IPFOXY_API_TOKEN)
+  bun cli.ts search vitrum --proxy
+
+  # Search with explicit proxy URL
   bun cli.ts search vitrum --proxy http://user:pass@proxy.example.com:8080
 
   # Concurrent search with multiple proxies (requires IPFOXY_API_TOKEN)
@@ -92,6 +95,7 @@ interface CLIOptions {
   limit?: number;
   format: 'json' | 'table' | 'summary';
   proxy?: string;
+  autoProxy: boolean; // --proxy without URL = auto-fetch from IPFoxy
   concurrency: number;
   debug: boolean;
   rateLimit: number;
@@ -99,8 +103,30 @@ interface CLIOptions {
 }
 
 function parseCliArgs(): { command: string; keywords: string[]; options: CLIOptions } {
+  const rawArgs = Bun.argv.slice(2);
+
+  // Detect --proxy or -p without a URL value (for auto-fetch)
+  // We need to check if --proxy/−p appears and the next arg is missing or is another flag
+  let autoProxy = false;
+  const processedArgs: string[] = [];
+
+  for (let i = 0; i < rawArgs.length; i++) {
+    const arg = rawArgs[i]!;
+    const nextArg = rawArgs[i + 1];
+
+    if (arg === '--proxy' || arg === '-p') {
+      // Check if next arg is missing or is another flag (starts with -)
+      if (!nextArg || nextArg.startsWith('-')) {
+        autoProxy = true;
+        // Skip this arg - don't pass --proxy to parseArgs
+        continue;
+      }
+    }
+    processedArgs.push(arg);
+  }
+
   const { values, positionals } = parseArgs({
-    args: Bun.argv.slice(2),
+    args: processedArgs,
     options: {
       full: { type: 'boolean', short: 'f', default: false },
       output: { type: 'string', short: 'o' },
@@ -133,6 +159,7 @@ function parseCliArgs(): { command: string; keywords: string[]; options: CLIOpti
       limit: values.limit ? parseInt(values.limit as string, 10) : undefined,
       format: (values.format as 'json' | 'table' | 'summary') || 'json',
       proxy: values.proxy as string | undefined,
+      autoProxy,
       concurrency: values.concurrency ? parseInt(values.concurrency as string, 10) : 1,
       debug: values.debug as boolean,
       rateLimit: values['rate-limit'] ? parseInt(values['rate-limit'] as string, 10) : 500,
@@ -222,11 +249,32 @@ async function runSearch(keyword: string, options: CLIOptions): Promise<void> {
   console.error(`Searching IMPI for "${keyword}"...`);
   console.error(`Mode: ${mode} | Details: ${options.full ? 'full' : 'basic'}${useBrowserMode ? ` | Browser: ${options.visible ? 'visible' : 'headless'}` : ''} | Human: ${options.human ? 'on' : 'off'}${options.debug ? ' | Debug: ON' : ''}`);
 
-  // Parse proxy from CLI flag if provided
+  // Resolve proxy: explicit URL > auto-fetch > env > none
   let proxy: ProxyConfig | undefined;
   if (options.proxy) {
+    // Explicit proxy URL provided
     proxy = parseProxyUrl(options.proxy);
     console.error(`Proxy: ${proxy.server}`);
+  } else if (options.autoProxy) {
+    // Auto-fetch from IPFoxy
+    const providerConfig = parseProxyProviderFromEnv();
+    if (!providerConfig) {
+      console.error('Error: --proxy requires IPFOXY_API_TOKEN to be set for auto-fetch');
+      console.error('Either set IPFOXY_API_TOKEN or provide a proxy URL: --proxy http://user:pass@host:port');
+      process.exit(1);
+    }
+    console.error(`Fetching proxy from ${providerConfig.provider}...`);
+    try {
+      const result = await fetchProxies(providerConfig, 1);
+      if (result.proxies.length === 0) {
+        throw new Error('No proxies returned');
+      }
+      proxy = result.proxies[0];
+      console.error(`Proxy: ${proxy!.server} (auto-fetched)`);
+    } catch (err) {
+      console.error(`Error fetching proxy: ${(err as Error).message}`);
+      process.exit(1);
+    }
   } else {
     console.error(`Proxy: from env or none`);
   }
