@@ -40,3 +40,4 @@ storage/
 *.json
 !package.json
 !tsconfig.json
+screenshots/
