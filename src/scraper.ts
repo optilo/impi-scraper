@@ -1,15 +1,17 @@
 /**
  * IMPI Trademark Scraper - Core Logic
- * Uses Crawlee + Playwright for stealth scraping with human-like interactions
+ * Uses Camoufox (Firefox-based) for stealth scraping with human-like interactions
+ * Falls back to Playwright/Crawlee for full detail searches with pagination
  */
 
 import { PlaywrightCrawler, log, Configuration } from 'crawlee';
 import { MemoryStorage } from '@crawlee/memory-storage';
-import type { Page, Browser, BrowserContext } from 'playwright';
+import { Camoufox } from 'camoufox-js';
+import type { Page, Browser, BrowserContext } from 'playwright-core';
 import { chromium } from 'playwright';
 import { addHumanBehavior, randomDelay } from './utils/human-behavior';
 import { parseDate } from './utils/data';
-import { detectExternalIp, resolveProxyConfig } from './utils/proxy';
+import { detectExternalIp, resolveProxyConfig, formatProxyForCamoufox } from './utils/proxy';
 import {
   IMPIError,
   type IMPIScraperOptions,
@@ -107,6 +109,7 @@ async function detectBlockingIndicators(page: Page): Promise<{ blocked: boolean;
 
 export class IMPIScraper {
   private options: Required<Omit<IMPIScraperOptions, 'proxy'>> & { proxy?: ProxyConfig };
+  private rawProxyOption: ProxyConfig | 'auto' | null | undefined;
   private results: TrademarkResult[] = [];
   private searchMetadata: SearchMetadata | null = null;
 
@@ -115,10 +118,17 @@ export class IMPIScraper {
   private managedContext: BrowserContext | null = null;
   private managedPage: Page | null = null;
   private browserStartTime: number = 0;
+  private proxyResolved = false;
 
   constructor(options: IMPIScraperOptions = {}) {
+    // Default to 'auto' proxy if not explicitly set
+    // This means: try to auto-fetch from IPFoxy, fall back to env vars, or no proxy if neither available
+    const proxyOption = options.proxy !== undefined ? options.proxy : 'auto';
+    this.rawProxyOption = proxyOption;
+
     // Resolve proxy from options or environment variables
-    const resolvedProxy = resolveProxyConfig(options.proxy);
+    // Handle 'auto' proxy option (will be resolved later when needed)
+    const resolvedProxy = proxyOption === 'auto' ? undefined : resolveProxyConfig(proxyOption);
 
     this.options = {
       headless: true,
@@ -133,8 +143,40 @@ export class IMPIScraper {
       debug: false,
       screenshotDir: './screenshots',
       ...options,
-      proxy: resolvedProxy, // Use resolved proxy (options > env var)
+      proxy: resolvedProxy, // Use resolved proxy (options > env var), 'auto' handled separately
     };
+  }
+
+  /**
+   * Resolve 'auto' proxy by fetching from IPFoxy
+   */
+  private async resolveAutoProxy(): Promise<void> {
+    if (this.proxyResolved) return;
+    this.proxyResolved = true;
+
+    if (this.rawProxyOption !== 'auto') return;
+
+    const { fetchProxiesFromEnv } = await import('./utils/proxy-provider');
+    log.info('Auto-fetching proxy from IPFoxy...');
+    const result = await fetchProxiesFromEnv(1);
+
+    if (!result || result.proxies.length === 0) {
+      // Fall back to environment variables if IPFoxy fails
+      const envProxy = resolveProxyConfig(undefined);
+      if (envProxy) {
+        log.info(`IPFoxy auto-fetch failed, using proxy from environment: ${envProxy.server}`);
+        this.options.proxy = envProxy;
+      } else {
+        log.warning('Auto-proxy: IPFoxy fetch failed and no proxy in environment. Continuing without proxy.');
+      }
+      return;
+    }
+
+    const proxy = result.proxies[0];
+    if (proxy) {
+      this.options.proxy = proxy;
+      log.info(`Using auto-fetched proxy: ${this.options.proxy.server}`);
+    }
   }
 
   /**
@@ -162,7 +204,7 @@ export class IMPIScraper {
   }
 
   /**
-   * Get browser launch options with optional proxy
+   * Get browser launch options with optional proxy (for Playwright/Crawlee)
    */
   private getBrowserLaunchOptions() {
     const launchOptions: any = {
@@ -189,15 +231,36 @@ export class IMPIScraper {
   }
 
   /**
+   * Create Camoufox browser instance (for direct search)
+   */
+  private async createCamoufoxBrowser() {
+    // Resolve 'auto' proxy before creating browser
+    await this.resolveAutoProxy();
+
+    const formattedProxy = formatProxyForCamoufox(this.options.proxy);
+    if (this.options.proxy) {
+      log.info(`Using Camoufox with proxy: ${this.options.proxy.server}`);
+    } else {
+      log.info('Using Camoufox without proxy');
+    }
+
+    return await Camoufox({
+      headless: this.options.headless,
+      geoip: true,
+      proxy: formattedProxy,
+    });
+  }
+
+  /**
    * Create a fresh browser instance (gets new IP from rotating proxy)
    */
   private async createFreshBrowser(): Promise<{ browser: Browser; context: BrowserContext; page: Page }> {
     // Close existing browser if any
     await this.closeManagedBrowser();
 
-    log.info('Creating fresh browser instance' + (this.options.proxy ? ' (new IP from rotating proxy)' : ''));
+    log.info('Creating fresh Camoufox browser instance' + (this.options.proxy ? ' (new IP from rotating proxy)' : ''));
 
-    const browser = await chromium.launch(this.getBrowserLaunchOptions());
+    const browser = await this.createCamoufoxBrowser();
     const context = await browser.newContext({
       userAgent: IMPI_CONFIG.userAgent,
     });
@@ -293,8 +356,8 @@ export class IMPIScraper {
     let browser: Browser | null = null;
 
     try {
-      // Launch single browser
-      browser = await chromium.launch(this.getBrowserLaunchOptions());
+      // Launch single Camoufox browser
+      browser = await this.createCamoufoxBrowser();
       const context = await browser.newContext({
         userAgent: IMPI_CONFIG.userAgent,
       });
@@ -383,8 +446,8 @@ export class IMPIScraper {
     const startTime = Date.now();
 
     try {
-      // Launch single browser for all searches
-      browser = await chromium.launch(this.getBrowserLaunchOptions());
+      // Launch single Camoufox browser for all searches
+      browser = await this.createCamoufoxBrowser();
       context = await browser.newContext({
         userAgent: IMPI_CONFIG.userAgent,
       });
@@ -485,7 +548,7 @@ export class IMPIScraper {
               await randomDelay(30000, 60000);
 
               // Restart browser (gets new IP from rotating proxy)
-              browser = await chromium.launch(this.getBrowserLaunchOptions());
+              browser = await this.createCamoufoxBrowser();
               context = await browser.newContext({
                 userAgent: IMPI_CONFIG.userAgent,
               });

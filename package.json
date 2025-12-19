@@ -59,7 +59,8 @@
     "bun": ">=1.0.0"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "tsx": "^4.21.0"
   },
   "peerDependencies": {
     "typescript": "^5"
@@ -67,6 +68,7 @@
   "dependencies": {
     "@crawlee/memory-storage": "^3.15.3",
     "@crawlee/playwright": "^3.15.3",
+    "camoufox-js": "^0.8.4",
     "crawlee": "^3.15.3"
   }
 }

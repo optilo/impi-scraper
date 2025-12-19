@@ -4,6 +4,7 @@
 
 import type { Page } from 'playwright';
 import type { ProxyConfig } from '../types';
+import type { ProxyConfig } from '../types';
 
 /**
  * IP check services (in order of preference)
@@ -119,6 +120,26 @@ export function resolveProxyConfig(optionsProxy?: ProxyConfig | null): ProxyConf
 
   // Fall back to environment variable
   return parseProxyFromEnv();
+}
+
+/**
+ * Format proxy config for Camoufox
+ * Camoufox expects: { server: 'http://host:port', username?, password? }
+ */
+export function formatProxyForCamoufox(proxy: ProxyConfig | undefined): any {
+  if (!proxy) return undefined;
+
+  // Ensure server has protocol
+  let server = proxy.server;
+  if (!server.includes('://')) {
+    server = `http://${server}`;
+  }
+
+  return {
+    server,
+    username: proxy.username,
+    password: proxy.password,
+  };
 }
 
 /**

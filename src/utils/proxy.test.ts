@@ -3,7 +3,7 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
-import { parseProxyUrl, parseProxyFromEnv, resolveProxyConfig } from './proxy';
+import { parseProxyUrl, parseProxyFromEnv, resolveProxyConfig, formatProxyForCamoufox } from './proxy';
 import type { ProxyConfig } from '../types';
 
 describe('parseProxyUrl', () => {
@@ -160,5 +160,68 @@ describe('resolveProxyConfig', () => {
   test('returns undefined when no proxy configured', () => {
     const result = resolveProxyConfig(undefined);
     expect(result).toBeUndefined();
+  });
+});
+
+describe('formatProxyForCamoufox', () => {
+  test('formats proxy with http:// prefix when missing', () => {
+    const proxy: ProxyConfig = {
+      server: 'gate-sg.ipfoxy.io:58688',
+      username: 'user123',
+      password: 'pass456',
+    };
+
+    const formatted = formatProxyForCamoufox(proxy);
+
+    expect(formatted).toBeDefined();
+    expect(formatted.server).toBe('http://gate-sg.ipfoxy.io:58688');
+    expect(formatted.username).toBe('user123');
+    expect(formatted.password).toBe('pass456');
+  });
+
+  test('preserves existing http:// prefix', () => {
+    const proxy: ProxyConfig = {
+      server: 'http://gate-sg.ipfoxy.io:58688',
+      username: 'user123',
+      password: 'pass456',
+    };
+
+    const formatted = formatProxyForCamoufox(proxy);
+
+    expect(formatted).toBeDefined();
+    expect(formatted.server).toBe('http://gate-sg.ipfoxy.io:58688');
+    expect(formatted.username).toBe('user123');
+    expect(formatted.password).toBe('pass456');
+  });
+
+  test('preserves https:// prefix', () => {
+    const proxy: ProxyConfig = {
+      server: 'https://gate-sg.ipfoxy.io:58688',
+      username: 'user123',
+      password: 'pass456',
+    };
+
+    const formatted = formatProxyForCamoufox(proxy);
+
+    expect(formatted).toBeDefined();
+    expect(formatted.server).toBe('https://gate-sg.ipfoxy.io:58688');
+  });
+
+  test('handles proxy without credentials', () => {
+    const proxy: ProxyConfig = {
+      server: 'gate-sg.ipfoxy.io:58688',
+    };
+
+    const formatted = formatProxyForCamoufox(proxy);
+
+    expect(formatted).toBeDefined();
+    expect(formatted.server).toBe('http://gate-sg.ipfoxy.io:58688');
+    expect(formatted.username).toBeUndefined();
+    expect(formatted.password).toBeUndefined();
+  });
+
+  test('returns undefined for undefined input', () => {
+    const formatted = formatProxyForCamoufox(undefined);
+    expect(formatted).toBeUndefined();
   });
 });

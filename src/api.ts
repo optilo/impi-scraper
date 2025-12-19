@@ -12,11 +12,13 @@
  * - Looks like normal API traffic to server
  */
 
-import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
+import { Camoufox } from 'camoufox-js';
+import type { Browser, BrowserContext, Page } from 'playwright-core';
 import { log } from 'crawlee';
 import { IMPIScraper } from './scraper';
 import { addHumanBehavior, randomDelay } from './utils/human-behavior';
-import { resolveProxyConfig } from './utils/proxy';
+import { resolveProxyConfig, formatProxyForCamoufox } from './utils/proxy';
+import { fetchProxiesFromEnv } from './utils/proxy-provider';
 import { parseDate } from './utils/data';
 import {
   IMPIError,
@@ -101,14 +103,24 @@ function createError(
  */
 export class IMPIApiClient {
   private options: Required<Omit<IMPIApiClientOptions, 'proxy'>> & { proxy?: ProxyConfig };
+  private rawProxyOption: ProxyConfig | 'auto' | null | undefined;
   private session: SessionTokens | null = null;
   private browser: Browser | null = null;
   private context: BrowserContext | null = null;
   private page: Page | null = null;
   private lastRequestTime = 0;
+  private proxyResolved = false;
 
   constructor(options: IMPIApiClientOptions = {}) {
-    const resolvedProxy = resolveProxyConfig(options.proxy);
+    // Default to 'auto' proxy if not explicitly set
+    // This means: try to auto-fetch from IPFoxy, fall back to env vars, or no proxy if neither available
+    const proxyOption = options.proxy !== undefined ? options.proxy : 'auto';
+    
+    // Store raw proxy option for lazy resolution (handles 'auto')
+    this.rawProxyOption = proxyOption;
+
+    // For non-auto cases, resolve immediately
+    const resolvedProxy = proxyOption === 'auto' ? undefined : resolveProxyConfig(proxyOption);
 
     this.options = {
       headless: true,
@@ -131,6 +143,34 @@ export class IMPIApiClient {
   }
 
   /**
+   * Resolve 'auto' proxy by fetching from IPFoxy
+   */
+  private async resolveAutoProxy(): Promise<void> {
+    if (this.proxyResolved) return;
+    this.proxyResolved = true;
+
+    if (this.rawProxyOption !== 'auto') return;
+
+    log.info('Auto-fetching proxy from IPFoxy...');
+    const result = await fetchProxiesFromEnv(1);
+
+    if (!result || result.proxies.length === 0) {
+      // Fall back to environment variables if IPFoxy fails
+      const envProxy = resolveProxyConfig(undefined);
+      if (envProxy) {
+        log.info(`IPFoxy auto-fetch failed, using proxy from environment: ${envProxy.server}`);
+        this.options.proxy = envProxy;
+      } else {
+        log.warning('Auto-proxy: IPFoxy fetch failed and no proxy in environment. Continuing without proxy.');
+      }
+      return;
+    }
+
+    this.options.proxy = result.proxies[0];
+    log.info(`Using auto-fetched proxy: ${this.options.proxy.server}`);
+  }
+
+  /**
    * Initialize session by extracting tokens from browser
    */
   async initSession(): Promise<void> {
@@ -139,28 +179,21 @@ export class IMPIApiClient {
       return;
     }
 
-    log.info('Initializing IMPI session via browser...');
+    // Resolve 'auto' proxy before first use
+    await this.resolveAutoProxy();
 
-    const launchOptions: any = {
-      headless: this.options.headless,
-      timeout: 60000,
-      args: [
-        '--disable-blink-features=AutomationControlled',
-        '--no-sandbox',
-        '--disable-dev-shm-usage',
-      ]
-    };
+    log.info('Initializing IMPI session via Camoufox...');
 
+    const formattedProxy = formatProxyForCamoufox(this.options.proxy);
     if (this.options.proxy) {
-      launchOptions.proxy = {
-        server: this.options.proxy.server,
-        username: this.options.proxy.username,
-        password: this.options.proxy.password,
-      };
       log.info(`Using proxy: ${this.options.proxy.server}`);
     }
 
-    this.browser = await chromium.launch(launchOptions);
+    this.browser = await Camoufox({
+      headless: this.options.headless,
+      geoip: true,
+      proxy: formattedProxy,
+    });
     this.context = await this.browser.newContext({
       userAgent: IMPI_CONFIG.userAgent,
     });
@@ -339,22 +372,12 @@ export class IMPIApiClient {
 
     // Need browser for initial search to get searchId
     if (!this.browser || !this.browser.isConnected()) {
-      const launchOptions: any = {
+      const formattedProxy = formatProxyForCamoufox(this.options.proxy);
+      this.browser = await Camoufox({
         headless: this.options.headless,
-        timeout: 60000,
-        args: [
-          '--disable-blink-features=AutomationControlled',
-          '--no-sandbox',
-        ]
-      };
-      if (this.options.proxy) {
-        launchOptions.proxy = {
-          server: this.options.proxy.server,
-          username: this.options.proxy.username,
-          password: this.options.proxy.password,
-        };
-      }
-      this.browser = await chromium.launch(launchOptions);
+        geoip: true,
+        proxy: formattedProxy,
+      });
       this.context = await this.browser.newContext({
         userAgent: IMPI_CONFIG.userAgent,
       });
