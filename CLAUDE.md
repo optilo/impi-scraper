@@ -61,6 +61,11 @@ const output = execSync('git status --porcelain', { encoding: 'utf-8' });
 
 ## Releases
 
+**Before creating a release**, always:
+1. Run `/sc:cleanup` to remove dead code and unused imports
+2. Update README.md if there are API changes, new features, or breaking changes
+3. Ensure all tests pass with `pnpm test`
+
 When the user asks to create a release, use the release script:
 
 ```bash
