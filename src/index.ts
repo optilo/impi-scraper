@@ -2,9 +2,9 @@
  * IMPI Trademark Scraper - Main Entry Point
  *
  * A TypeScript scraper for IMPI (Instituto Mexicano de la Propiedad Industrial).
- * Uses Crawlee + Playwright with human-like interactions and anti-detection features.
+ * Uses Camoufox (headless Firefox) for anti-detection with API-based data fetching.
  *
- * @example Basic search (uses API mode by default - fastest)
+ * @example Basic search
  * ```typescript
  * import { searchTrademarks } from '@optilo/impi-scraper';
  *
@@ -12,7 +12,7 @@
  * console.log(results.results);
  * ```
  *
- * @example API client for multiple searches (reuses session)
+ * @example API client for multiple searches (reuses session - most efficient)
  * ```typescript
  * import { IMPIApiClient } from '@optilo/impi-scraper';
  *
@@ -22,28 +22,27 @@
  * await client.close();
  * ```
  *
- * @example Full browser mode (legacy, slower but more robust)
+ * @example Concurrent pool for high-throughput searching
  * ```typescript
- * import { IMPIScraper } from '@optilo/impi-scraper';
+ * import { IMPIConcurrentPool } from '@optilo/impi-scraper';
  *
- * const scraper = new IMPIScraper({ detailLevel: 'full' });
- * const results = await scraper.search('nike');
+ * const pool = new IMPIConcurrentPool({ concurrency: 3 });
+ * const results = await pool.searchMany(['nike', 'adidas', 'puma']);
+ * await pool.close();
  * ```
  */
 
-// API mode (recommended - faster, uses browser only for session tokens)
+// Main API (uses Camoufox for session + direct API calls)
 export { IMPIApiClient, IMPIConcurrentPool, searchTrademarks } from './api';
 export type { IMPIApiClientOptions, ConcurrentPoolOptions, ConcurrentSearchResult } from './api';
 
-// Browser mode (legacy - full browser control)
-export { IMPIScraper } from './scraper';
+// Proxy utilities
 export { parseProxyUrl, parseProxyFromEnv, resolveProxyConfig, testProxy, isProxyError, getProxyErrorMessage } from './utils/proxy';
 export { fetchProxies, fetchProxiesFromEnv, fetchIPFoxyProxies, parseProxyProviderFromEnv } from './utils/proxy-provider';
 export type { ProxyProviderConfig, ProxyProviderResult } from './utils/proxy-provider';
-export {
-  // Error class
-  IMPIError
-} from './types';
+
+// Error handling
+export { IMPIError } from './types';
 export type {
   // Configuration
   IMPIScraperOptions,

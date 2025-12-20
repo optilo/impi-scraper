@@ -2,7 +2,7 @@
  * Proxy and IP detection utilities
  */
 
-import type { Page } from 'playwright';
+import type { Page } from 'playwright-core';
 import type { ProxyConfig } from '../types';
 
 /**
@@ -103,15 +103,9 @@ export function parseProxyUrl(proxyUrl: string): ProxyConfig {
 /**
  * Merge proxy config from options and environment
  * - ProxyConfig object: use that proxy
- * - null: explicitly disable proxy (no env fallback)
  * - undefined: fall back to environment variables
  */
-export function resolveProxyConfig(optionsProxy?: ProxyConfig | null): ProxyConfig | undefined {
-  // Explicit null means "no proxy" - don't fall back to env vars
-  if (optionsProxy === null) {
-    return undefined;
-  }
-
+export function resolveProxyConfig(optionsProxy?: ProxyConfig): ProxyConfig | undefined {
   // Explicit proxy config takes precedence
   if (optionsProxy) {
     return optionsProxy;
@@ -183,7 +177,7 @@ export function getProxyErrorMessage(error: Error, proxyServer?: string): string
  * Returns the external IP if successful, throws on failure
  */
 export async function testProxy(proxyConfig: ProxyConfig): Promise<string> {
-  const { chromium } = await import('playwright');
+  const { chromium } = await import('playwright-core');
 
   let browser;
   try {

@@ -4,10 +4,9 @@
  * Run: pnpm test tests/camoufox-proxy.test.ts --testTimeout=120000
  */
 
-import { test, expect, describe, beforeAll } from 'vitest';
+import { test, expect, describe } from 'vitest';
 import { formatProxyForCamoufox } from '../src/utils/proxy';
 import type { ProxyConfig } from '../src/types';
-import { IMPIScraper } from '../src/scraper';
 import { IMPIApiClient } from '../src/api';
 import { parseProxyProviderFromEnv } from '../src/utils/proxy-provider';
 
@@ -74,74 +73,6 @@ describe('formatProxyForCamoufox utility', () => {
   });
 });
 
-describe('IMPIScraper auto-proxy default behavior', () => {
-  const hasIPFoxyToken = !!parseProxyProviderFromEnv();
-
-  test('defaults to auto-proxy when proxy not specified', async () => {
-    // Create scraper without specifying proxy - should default to 'auto'
-    const scraper = new IMPIScraper({
-      headless: true,
-      detailLevel: 'basic',
-    });
-
-    // The scraper should have auto-proxy configured (will be resolved when browser is created)
-    // We can't directly test the internal state, but we can verify it doesn't throw
-    expect(scraper).toBeDefined();
-
-    // Try a simple search - this will trigger auto-proxy resolution
-    try {
-      const results = await scraper.search('vitrum');
-
-      expect(results).toBeDefined();
-      expect(results.metadata).toBeDefined();
-      expect(results.metadata.query).toBe('vitrum');
-      console.log('\n✅ Auto-proxy default behavior: Search succeeded');
-    } catch (err) {
-      // If IPFoxy token is not set, it should fall back gracefully
-      const error = err as Error;
-      if (error.message.includes('IPFOXY_API_TOKEN')) {
-        console.log('\n⚠️  Auto-proxy: IPFoxy token not set, falling back to env/no proxy');
-        // This is acceptable - the fallback should work
-        expect(true).toBe(true);
-      } else {
-        throw err;
-      }
-    }
-  }, 120000);
-
-  test('explicitly disables proxy when proxy: null', async () => {
-    const scraper = new IMPIScraper({
-      headless: true,
-      detailLevel: 'basic',
-      proxy: null, // Explicitly disable
-    });
-
-    expect(scraper).toBeDefined();
-
-    // Should work without proxy
-    const results = await scraper.search('vitrum');
-
-    expect(results).toBeDefined();
-    expect(results.metadata.query).toBe('vitrum');
-    console.log('\n✅ Explicit proxy: null - Search succeeded without proxy');
-  }, 120000);
-
-  test.skipIf(!hasIPFoxyToken)('uses auto-fetched proxy when IPFOXY_API_TOKEN is set', async () => {
-    const scraper = new IMPIScraper({
-      headless: true,
-      detailLevel: 'basic',
-      // proxy not specified = defaults to 'auto'
-    });
-
-    // This should auto-fetch from IPFoxy
-    const results = await scraper.search('vitrum');
-
-    expect(results).toBeDefined();
-    expect(results.metadata.query).toBe('vitrum');
-    console.log('\n✅ Auto-fetched proxy: Search succeeded with IPFoxy proxy');
-  }, 120000);
-});
-
 describe('IMPIApiClient auto-proxy default behavior', () => {
   const hasIPFoxyToken = !!parseProxyProviderFromEnv();
 
@@ -170,20 +101,6 @@ describe('IMPIApiClient auto-proxy default behavior', () => {
     }
   }, 60000);
 
-  test('explicitly disables proxy when proxy: null', async () => {
-    const client = new IMPIApiClient({
-      headless: true,
-      proxy: null, // Explicitly disable
-    });
-
-    expect(client).toBeDefined();
-
-    // Should work without proxy
-    await client.initSession();
-    console.log('\n✅ Explicit proxy: null - Session initialized without proxy');
-    await client.close();
-  }, 60000);
-
   test.skipIf(!hasIPFoxyToken)('uses auto-fetched proxy when IPFOXY_API_TOKEN is set', async () => {
     const client = new IMPIApiClient({
       headless: true,
@@ -198,29 +115,15 @@ describe('IMPIApiClient auto-proxy default behavior', () => {
 });
 
 describe('Camoufox integration verification', () => {
-  test('IMPIScraper uses Camoufox for direct searches', async () => {
-    const scraper = new IMPIScraper({
-      headless: true,
-      detailLevel: 'basic',
-      proxy: null, // Disable proxy for this test
-    });
+  const hasIPFoxyToken = !!parseProxyProviderFromEnv();
 
-    // Direct search should use Camoufox (not Playwright)
-    const results = await scraper.search('vitrum');
-
-    expect(results).toBeDefined();
-    expect(results.metadata.query).toBe('vitrum');
-    expect(results.results.length).toBeGreaterThan(0);
-    console.log('\n✅ Camoufox integration: Direct search succeeded');
-  }, 120000);
-
-  test('IMPIApiClient uses Camoufox for session initialization', async () => {
+  test.skipIf(!hasIPFoxyToken)('IMPIApiClient uses Camoufox with proxy for session initialization', async () => {
     const client = new IMPIApiClient({
       headless: true,
-      proxy: null, // Disable proxy for this test
+      // proxy defaults to 'auto' - will use IPFoxy
     });
 
-    // Session initialization should use Camoufox
+    // Session initialization should use Camoufox with proxy
     await client.initSession();
 
     // Verify session is valid by doing a quick search
@@ -228,7 +131,7 @@ describe('Camoufox integration verification', () => {
     expect(searchId).toBeDefined();
     expect(totalResults).toBeGreaterThan(0);
 
-    console.log('\n✅ Camoufox integration: Session initialization and quick search succeeded');
+    console.log('\n✅ Camoufox integration: Session initialization and quick search succeeded with proxy');
     await client.close();
   }, 120000);
 });

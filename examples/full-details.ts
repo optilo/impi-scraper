@@ -5,23 +5,24 @@
  * Run with: pnpm example:full
  */
 
-import { IMPIScraper } from '../src/index';
+import { IMPIApiClient } from '../src/index';
 
 async function main() {
   const keyword = process.argv[2] || 'nike';
 
   console.log(`Performing full detail search for "${keyword}"...\n`);
 
-  const scraper = new IMPIScraper({
+  const client = new IMPIApiClient({
     detailLevel: 'full',   // Get complete details
     headless: true,
-    rateLimitMs: 2500,     // Be more conservative with full details
+    apiRateLimitMs: 500,   // Rate limit between API calls
     maxRetries: 3,
     humanBehavior: true
   });
 
   try {
-    const results = await scraper.search(keyword);
+    const results = await client.search(keyword);
+    await client.close();
 
     console.log('Search completed!\n');
     console.log(`Found ${results.results.length} trademarks\n`);

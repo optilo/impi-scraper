@@ -43,8 +43,7 @@
     "trademark",
     "scraper",
     "mexico",
-    "crawlee",
-    "playwright",
+    "camoufox",
     "web-scraping",
     "intellectual-property",
     "brand-search"
@@ -68,9 +67,6 @@
     "typescript": "^5"
   },
   "dependencies": {
-    "@crawlee/memory-storage": "^3.15.3",
-    "@crawlee/playwright": "^3.15.3",
-    "camoufox-js": "^0.8.4",
-    "crawlee": "^3.15.3"
+    "camoufox-js": "^0.8.4"
   }
 }

@@ -84,7 +84,7 @@ export interface IMPIScraperOptions {
   humanBehavior?: boolean;
   detailLevel?: 'basic' | 'full';
   maxResults?: number;
-  proxy?: ProxyConfig | 'auto' | null;  // 'auto' = fetch from IPFoxy, null = no proxy, undefined = use env vars
+  proxy?: ProxyConfig | 'auto';  // 'auto' (default) = fetch from IPFoxy, or provide explicit ProxyConfig
   detailTimeoutMs?: number;      // Timeout for fetching individual trademark details (default: 30000)
   browserTimeoutMs?: number;     // Timeout before refreshing browser (default: 300000 = 5min)
   debug?: boolean;               // Enable debug mode: saves screenshots on errors/blocks

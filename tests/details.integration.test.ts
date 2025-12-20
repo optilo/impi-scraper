@@ -5,7 +5,7 @@
  */
 
 import { describe, test, expect } from 'vitest';
-import { IMPIScraper } from '../src/index';
+import { IMPIApiClient } from '../src/index';
 
 // ISO date format regex: YYYY-MM-DD
 const ISO_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
@@ -25,15 +25,16 @@ const UUID_REGEX = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12
 
 describe('Full Details Integration', () => {
   test('fetches full details for "vitrum" with complete data validation', async () => {
-    const scraper = new IMPIScraper({
+    const client = new IMPIApiClient({
       headless: true,
       detailLevel: 'full',
       humanBehavior: true,
-      rateLimitMs: 2000,
+      apiRateLimitMs: 500,
       maxResults: 3 // Limit to 3 results for faster test
     });
 
-    const results = await scraper.search('vitrum');
+    const results = await client.search('vitrum');
+    await client.close();
 
     // ===== METADATA VALIDATION =====
     expect(results).toBeDefined();

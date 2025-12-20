@@ -5,7 +5,7 @@
  */
 
 import { describe, test, expect } from 'vitest';
-import { searchTrademarks, IMPIScraper, testProxy, fetchProxiesFromEnv, parseProxyProviderFromEnv } from '../src/index';
+import { searchTrademarks, IMPIApiClient, testProxy, fetchProxiesFromEnv, parseProxyProviderFromEnv } from '../src/index';
 
 describe('External IP Detection', () => {
   test('returns external IP in search metadata', async () => {
@@ -32,19 +32,19 @@ describe('External IP Detection', () => {
 
 describe('Proxy Configuration', () => {
   test('accepts proxy in options', () => {
-    const scraper = new IMPIScraper({
+    const client = new IMPIApiClient({
       proxy: {
         server: 'http://test-proxy:8080',
         username: 'user',
         password: 'pass',
       },
     });
-    expect(scraper).toBeDefined();
+    expect(client).toBeDefined();
   });
 
   test('works without proxy config', () => {
-    const scraper = new IMPIScraper({ headless: true });
-    expect(scraper).toBeDefined();
+    const client = new IMPIApiClient({ headless: true });
+    expect(client).toBeDefined();
   });
 
   // Only run if proxy env var is set

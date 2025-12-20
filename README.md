@@ -1,17 +1,16 @@
 # IMPI Trademark Scraper
 
-A TypeScript scraper for IMPI (Instituto Mexicano de la Propiedad Industrial) - the Mexican trademark office. Uses Crawlee + Playwright with human-like interactions and anti-detection features.
+A TypeScript scraper for IMPI (Instituto Mexicano de la Propiedad Industrial) - the Mexican trademark office. Uses Camoufox (headless Firefox with anti-detection) for session tokens, then direct API calls for data fetching.
 
 ## Features
 
+- **API-Only Mode**: Fast direct API calls after session token extraction (10-50x faster than browser scraping)
+- **Camoufox Anti-Detection**: Uses Camoufox (Firefox with anti-detection) for initial session only
 - **Keyword Search**: Search trademarks by keyword
-- **API Mode** (default): Fast direct API calls after session token extraction (10-50x faster)
 - **Concurrent Search**: Multiple workers with per-worker proxy rotation
 - **Human-like Behavior**: Simulates real user interactions (mouse movements, typing delays, scrolling)
-- **Anti-Detection**: Built-in measures to avoid bot detection
 - **Proxy Support**: Route requests through HTTP/SOCKS proxies for IP rotation
 - **IPFoxy Integration**: Built-in support for [IPFoxy](https://www.ipfoxy.com/) rotating proxy API
-- **External IP Detection**: Returns the IP address used for each request
 - **Full Details**: Option to fetch complete trademark information including owners, classes, and history
 - **CLI Interface**: Easy command-line access with multiple output formats
 - **TypeScript**: Fully typed with comprehensive type definitions
@@ -22,8 +21,8 @@ A TypeScript scraper for IMPI (Instituto Mexicano de la Propiedad Industrial) - 
 # Install dependencies
 pnpm install
 
-# Install Playwright browser (first time only)
-pnpm exec playwright install chromium
+# Download Camoufox browser (first time only)
+pnpm exec camoufox-js fetch
 ```
 
 ## CLI Usage
@@ -83,8 +82,7 @@ tsx cli.ts fetch-proxies [count]
 |--------|-------|-------------|
 | `--full` | `-f` | Fetch full details (owners, classes, history) |
 | `--output FILE` | `-o` | Output to JSON file |
-| `--visible` | `-v` | Show browser window (forces browser mode) |
-| `--browser` | | Force full browser mode (slower, more robust) |
+| `--visible` | `-v` | Show browser window |
 | `--human` | | Enable human-like behavior (slower) |
 | `--limit NUM` | `-l` | Limit number of results |
 | `--format` | | Output format: json, table, summary |
@@ -165,9 +163,9 @@ const results = await pool.searchMany(['nike', 'adidas', 'puma', 'reebok', 'conv
 
 for (const r of results) {
   if (r.results) {
-    console.log(`✓ ${r.query}: ${r.results.metadata.totalResults} results (worker ${r.workerId})`);
+    console.log(`${r.query}: ${r.results.metadata.totalResults} results (worker ${r.workerId})`);
   } else {
-    console.log(`✗ ${r.query}: ${r.error?.message}`);
+    console.log(`${r.query}: ${r.error?.message}`);
   }
 }
 
@@ -179,7 +177,7 @@ await pool.close();
 ### Basic Search
 
 ```typescript
-import { searchTrademarks } from './src/index';
+import { searchTrademarks } from '@optilo/impi-scraper';
 
 const results = await searchTrademarks('vitrum', {
   detailLevel: 'basic',  // 'basic' or 'full'
@@ -193,28 +191,55 @@ console.log(`Found ${results.results.length} trademarks`);
 ### Full Details Search
 
 ```typescript
-import { IMPIScraper } from './src/index';
+import { IMPIApiClient } from '@optilo/impi-scraper';
 
-const scraper = new IMPIScraper({
+const client = new IMPIApiClient({
   detailLevel: 'full',   // Fetches owner info, classes, history
   headless: true,
-  rateLimitMs: 2500,     // 2.5 seconds between detail requests
+  apiRateLimitMs: 500,   // Rate limit between API calls
   maxRetries: 3
 });
 
-const results = await scraper.search('nike');
+const results = await client.search('nike');
 
 // Access full details
 results.results.forEach(tm => {
   console.log(`${tm.title} - Owner: ${tm.ownerName}`);
   console.log(`Classes: ${tm.classes?.map(c => c.classNumber).join(', ')}`);
 });
+
+await client.close();
+```
+
+### Low-Level API Access
+
+For more control, use the API client directly:
+
+```typescript
+import { IMPIApiClient } from '@optilo/impi-scraper';
+
+const client = new IMPIApiClient({ headless: true });
+
+// Initialize session (browser for token, then closes)
+await client.initSession();
+
+// Quick search to get searchId
+const { searchId, totalResults } = await client.quickSearch('vitrum');
+
+// Fetch results via direct API (fast, no browser)
+const page1 = await client.getSearchResults(searchId, 0, 100);
+const page2 = await client.getSearchResults(searchId, 1, 100);
+
+// Fetch details via direct API
+const details = await client.getTrademarkDetails('RM2020001234', searchId);
+
+await client.close();
 ```
 
 ### Search with Proxy
 
 ```typescript
-import { searchTrademarks } from './src/index';
+import { searchTrademarks } from '@optilo/impi-scraper';
 
 // Option 1: Explicit proxy configuration
 const results = await searchTrademarks('vitrum', {
@@ -259,13 +284,13 @@ IPFoxy uses session-based IP rotation. Each proxy returned has a unique session 
 ```bash
 $ tsx cli.ts fetch-proxies 3
 
-✅ Fetched 3 proxy(ies):
+Fetched 3 proxy(ies):
 Proxy 1: Server: http://gate-sg.ipfoxy.io:58688
-  Username: customer-xxx-sessid-123_10000  → IP: 1.2.3.4
+  Username: customer-xxx-sessid-123_10000  -> IP: 1.2.3.4
 Proxy 2: Server: http://gate-sg.ipfoxy.io:58688
-  Username: customer-xxx-sessid-123_10001  → IP: 5.6.7.8
+  Username: customer-xxx-sessid-123_10001  -> IP: 5.6.7.8
 Proxy 3: Server: http://gate-sg.ipfoxy.io:58688
-  Username: customer-xxx-sessid-123_10002  → IP: 9.10.11.12
+  Username: customer-xxx-sessid-123_10002  -> IP: 9.10.11.12
 ```
 
 ### Programmatic Usage
@@ -273,7 +298,7 @@ Proxy 3: Server: http://gate-sg.ipfoxy.io:58688
 #### Basic: Single Proxy
 
 ```typescript
-import { fetchProxiesFromEnv, searchTrademarks } from './src/index';
+import { fetchProxiesFromEnv, searchTrademarks } from '@optilo/impi-scraper';
 
 // Fetch one proxy and use it
 const proxyResult = await fetchProxiesFromEnv(1);
@@ -288,7 +313,7 @@ if (proxyResult) {
 #### Advanced: Concurrent Searches with Different IPs
 
 ```typescript
-import { fetchProxiesFromEnv, searchTrademarks } from './src/index';
+import { fetchProxiesFromEnv, searchTrademarks } from '@optilo/impi-scraper';
 
 // Fetch 5 proxies (5 different IPs)
 const proxyResult = await fetchProxiesFromEnv(5);
@@ -317,7 +342,7 @@ import {
   fetchIPFoxyProxies,
   parseProxyProviderFromEnv,
   type ProxyProviderConfig
-} from './src/index';
+} from '@optilo/impi-scraper';
 
 // Option 1: Use env config
 const config = parseProxyProviderFromEnv();
@@ -355,11 +380,11 @@ This tests:
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `headless` | boolean | `true` | Run browser in headless mode |
-| `rateLimitMs` | number | `2000` | Milliseconds between requests |
-| `maxConcurrency` | number | `1` | Max concurrent requests |
+| `apiRateLimitMs` | number | `500` | Milliseconds between API requests |
 | `maxRetries` | number | `3` | Max retries on failure |
-| `humanBehavior` | boolean | `false` | Enable human-like interactions |
+| `humanBehavior` | boolean | `true` | Enable human-like interactions |
 | `detailLevel` | 'basic' \| 'full' | `'basic'` | Level of detail to fetch |
+| `maxResults` | number | `0` | Limit results (0 = no limit) |
 | `proxy` | ProxyConfig | `undefined` | Proxy configuration (see below) |
 
 ### Proxy Configuration
@@ -402,7 +427,7 @@ interface TrademarkResult {
   impiId: string;                // e.g., "RM200200532011"
   detailsUrl: string;            // Direct link to IMPI details page
   title: string;
-  status: string;                // "REGISTRADO", "EN TRÁMITE", etc.
+  status: string;                // "REGISTRADO", "EN TRAMITE", etc.
   applicationNumber: string;
   registrationNumber: string | null;
   appType: string;
@@ -466,7 +491,7 @@ interface TrademarkHistory {
 }
 
 interface TrademarkOficio {
-  description: string;           // e.g., "CONCESIÓN DE LA PROTECCIÓN"
+  description: string;           // e.g., "CONCESION DE LA PROTECCION"
   officeNumber: string;
   date: string | null;
   notificationStatus: string;
@@ -541,7 +566,7 @@ interface IMPIError extends Error {
 
 ```bash
 # Run unit tests (fast, no network)
-pnpm test src/
+pnpm test
 
 # Run all integration tests (requires network, slow)
 pnpm test:integration
@@ -562,15 +587,15 @@ impi-scraper/
 ├── cli.ts                    # CLI entry point
 ├── src/
 │   ├── index.ts              # Main exports
-│   ├── api.ts                # Simple searchTrademarks() API
-│   ├── scraper.ts            # Core IMPIScraper class
+│   ├── api.ts                # IMPIApiClient and searchTrademarks()
+│   ├── api.test.ts           # Unit tests for API client
 │   ├── types.ts              # TypeScript type definitions
-│   ├── scraper.test.ts       # Unit tests
 │   └── utils/
 │       ├── human-behavior.ts # Anti-detection utilities
 │       ├── human-behavior.test.ts
 │       ├── data.ts           # Data parsing utilities
 │       ├── data.test.ts
+│       ├── logger.ts         # Logging utility
 │       ├── proxy.ts          # Proxy configuration utilities
 │       ├── proxy.test.ts
 │       └── proxy-provider.ts # IPFoxy API integration for rotating proxies
@@ -592,7 +617,7 @@ impi-scraper/
 Copy the `src/` folder into your project and import:
 
 ```typescript
-import { searchTrademarks, IMPIScraper } from './path/to/src/index';
+import { searchTrademarks, IMPIApiClient } from './path/to/src/index';
 ```
 
 ### Option 2: Local package reference
@@ -633,6 +658,20 @@ git submodule add <repo-url> packages/impi-scraper
 | `pnpm test:search` | Run search integration tests |
 | `pnpm test:details` | Run details integration tests |
 | `pnpm test:proxy` | Run proxy/IPFoxy integration tests |
+| `pnpm typecheck` | Run TypeScript type checking |
+
+## How It Works
+
+1. **Session Initialization**: Uses Camoufox (Firefox with anti-detection) to navigate to IMPI search page and extract session tokens (XSRF-TOKEN, JSESSIONID, SESSIONTOKEN)
+2. **Browser Closes**: After getting tokens, the browser closes to save resources
+3. **API Calls**: All subsequent search and detail requests use direct HTTP API calls with the session tokens
+4. **Token Refresh**: Sessions are automatically refreshed when they expire (typically every 25-30 minutes)
+
+This approach provides:
+- **Speed**: Direct API calls are 10-50x faster than browser automation
+- **Reliability**: No browser crashes or memory leaks during data fetching
+- **Anti-Detection**: Only the initial page load uses a browser, reducing detection risk
+- **Low Resource Usage**: No browser running during the actual scraping
 
 ## Notes
 
@@ -640,7 +679,6 @@ git submodule add <repo-url> packages/impi-scraper
 - Human behavior simulation adds slight delays but helps avoid detection
 - Full detail mode makes additional API calls per result (slower but more data)
 - Results are returned in ISO date format (YYYY-MM-DD)
-- External IP is detected at the start of each search session using ipify.org
 - Proxy configuration supports HTTP, HTTPS, and SOCKS5 protocols
 - When using rotating proxies, each browser session gets a fresh IP
 

@@ -2,7 +2,7 @@
  * Human-like behavior utilities for stealth scraping
  */
 
-import type { Page } from 'playwright';
+import type { Page } from 'playwright-core';
 
 /**
  * Random delay between min and max milliseconds
@@ -53,7 +53,7 @@ export async function smoothMouseMove(page: Page, targetX: number, targetY: numb
 export async function humanScroll(page: Page, direction: 'up' | 'down' = 'down', distance = 300): Promise<void> {
   const scrollAmount = direction === 'down' ? distance : -distance;
 
-  await page.evaluate((amount) => {
+  await page.evaluate((amount: number) => {
     const scrollSteps = 10;
     const stepAmount = amount / scrollSteps;
     let currentStep = 0;

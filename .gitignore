@@ -42,7 +42,11 @@ storage/
 !tsconfig.json
 screenshots/
 
-# pnpm files (project uses bun)
+# Lock files
 pnpm-lock.yaml
 pnpm-workspace.yaml
 bun.lock
+
+# Development/stress test files
+trademarks.txt
+scripts/

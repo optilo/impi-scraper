@@ -25,7 +25,7 @@
 import 'dotenv/config';
 
 import { parseArgs } from 'util';
-import { IMPIApiClient, IMPIConcurrentPool, IMPIScraper } from './src/index';
+import { IMPIApiClient, IMPIConcurrentPool } from './src/index';
 import { parseProxyUrl } from './src/utils/proxy';
 import { fetchProxiesFromEnv, fetchProxies, parseProxyProviderFromEnv } from './src/utils/proxy-provider';
 import type { SearchResults, ProxyConfig } from './src/types';
@@ -54,7 +54,7 @@ OPTIONS:
   --proxy [URL]       Use proxy. Without URL: auto-fetch from IPFoxy. With URL: use that proxy
   --concurrency, -c   Number of concurrent workers (default: 1, requires IPFOXY_API_TOKEN)
   --debug, -d         Save screenshots on CAPTCHA/blocking detection (to ./screenshots)
-  --rate-limit NUM    API rate limit in ms (default: 500 = 2 req/sec)
+  --rate-limit NUM    API rate limit in ms (default: 100 = 10 req/sec)
   --help, -h          Show this help
 
 ENVIRONMENT VARIABLES:
@@ -165,7 +165,7 @@ function parseCliArgs(): { command: string; keywords: string[]; options: CLIOpti
       autoProxy,
       concurrency: values.concurrency ? parseInt(values.concurrency as string, 10) : 1,
       debug: values.debug as boolean,
-      rateLimit: values['rate-limit'] ? parseInt(values['rate-limit'] as string, 10) : 500,
+      rateLimit: values['rate-limit'] ? parseInt(values['rate-limit'] as string, 10) : 100, // Default: 10 req/sec
       help: values.help as boolean,
     },
   };
@@ -292,16 +292,22 @@ async function runSearch(keyword: string, options: CLIOptions): Promise<void> {
   let results: SearchResults;
 
   if (useBrowserMode) {
-    // Legacy browser mode
-    const scraper = new IMPIScraper({
+    // Visible browser mode (still uses IMPIApiClient but with visible browser)
+    const client = new IMPIApiClient({
       headless: !options.visible,
       detailLevel: options.full ? 'full' : 'basic',
       humanBehavior: options.human,
-      rateLimitMs: options.full ? 2500 : 2000,
+      apiRateLimitMs: options.rateLimit,
+      maxResults: options.limit || 0,
       proxy,
       debug: options.debug,
+      keepBrowserOpen: true, // Keep browser open for visible mode
     });
-    results = await scraper.search(keyword);
+    try {
+      results = await client.search(keyword);
+    } finally {
+      await client.close();
+    }
   } else {
     // API mode (default - faster)
     const client = new IMPIApiClient({
@@ -554,4 +560,10 @@ async function runFetchProxies(count: number): Promise<void> {
   }
 }
 
-main();
+main().then(() => {
+  // Explicitly exit to ensure all Camoufox subprocess resources are released
+  process.exit(0);
+}).catch((err) => {
+  console.error('Fatal error:', err);
+  process.exit(1);
+});

@@ -14,8 +14,7 @@
 
 import { Camoufox } from 'camoufox-js';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
-import { log } from 'crawlee';
-import { IMPIScraper } from './scraper';
+import { log } from './utils/logger';
 import { addHumanBehavior, randomDelay } from './utils/human-behavior';
 import { resolveProxyConfig, formatProxyForCamoufox } from './utils/proxy';
 import { fetchProxiesFromEnv } from './utils/proxy-provider';
@@ -32,14 +31,19 @@ import {
 } from './types';
 
 /**
- * Quick search function for IMPI trademarks (browser-based)
+ * Quick search function for IMPI trademarks
+ * Uses IMPIApiClient for efficient API-based searching
  * @param query - Search term (keyword)
- * @param options - Scraper options
+ * @param options - Client options
  * @returns Search results with metadata
  */
 export async function searchTrademarks(query: string, options: IMPIScraperOptions = {}): Promise<SearchResults> {
-  const scraper = new IMPIScraper(options);
-  return await scraper.search(query);
+  const client = new IMPIApiClient(options);
+  try {
+    return await client.search(query);
+  } finally {
+    await client.close();
+  }
 }
 
 // ============================================================================
@@ -64,7 +68,7 @@ interface SessionTokens {
 }
 
 export interface IMPIApiClientOptions extends IMPIScraperOptions {
-  /** Rate limit between API requests in ms (default: 500ms = 2 req/sec) */
+  /** Rate limit between API requests in ms (default: 500ms) */
   apiRateLimitMs?: number;
   /** Keep browser open for token refresh (default: false) */
   keepBrowserOpen?: boolean;
@@ -103,7 +107,7 @@ function createError(
  */
 export class IMPIApiClient {
   private options: Required<Omit<IMPIApiClientOptions, 'proxy'>> & { proxy?: ProxyConfig };
-  private rawProxyOption: ProxyConfig | 'auto' | null | undefined;
+  private rawProxyOption: ProxyConfig | 'auto' | undefined;
   private session: SessionTokens | null = null;
   private browser: Browser | null = null;
   private context: BrowserContext | null = null;
@@ -112,10 +116,10 @@ export class IMPIApiClient {
   private proxyResolved = false;
 
   constructor(options: IMPIApiClientOptions = {}) {
-    // Default to 'auto' proxy if not explicitly set
-    // This means: try to auto-fetch from IPFoxy, fall back to env vars, or no proxy if neither available
-    const proxyOption = options.proxy !== undefined ? options.proxy : 'auto';
-    
+    // Default to no proxy if not explicitly set
+    // Use proxy: 'auto' to auto-fetch from IPFoxy, or provide a ProxyConfig object
+    const proxyOption = options.proxy;
+
     // Store raw proxy option for lazy resolution (handles 'auto')
     this.rawProxyOption = proxyOption;
 
@@ -219,7 +223,6 @@ export class IMPIApiClient {
     this.page = await this.context.newPage();
 
     if (this.options.humanBehavior && this.page) {
-      // @ts-expect-error - Playwright type compatibility between versions
       await addHumanBehavior(this.page);
     }
 
@@ -282,10 +285,9 @@ export class IMPIApiClient {
             this.page = await this.context.newPage();
             
             if (this.options.humanBehavior && this.page) {
-              // @ts-expect-error - Playwright type compatibility between versions
               await addHumanBehavior(this.page);
             }
-            
+
             // Wait before retry
             await randomDelay(2000, 3000);
             continue;
@@ -501,7 +503,6 @@ export class IMPIApiClient {
       this.page = await this.context.newPage();
 
       if (this.options.humanBehavior && this.page) {
-        // @ts-expect-error - Playwright type compatibility between versions
         await addHumanBehavior(this.page);
       }
     }
@@ -658,11 +659,10 @@ export class IMPIApiClient {
             this.page = await this.context.newPage();
             
             if (this.options.humanBehavior && this.page) {
-              // @ts-expect-error - Playwright type compatibility between versions
               await addHumanBehavior(this.page);
             }
           }
-          
+
           // Wait before retry
           await randomDelay(2000, 3000);
           continue;
