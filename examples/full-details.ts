@@ -2,7 +2,7 @@
  * Example: Full detail search with owner and class information
  * Demonstrates advanced usage with complete trademark details
  *
- * Run with: bun examples/full-details.ts
+ * Run with: pnpm example:full
  */
 
 import { IMPIScraper } from '../src/index';
@@ -69,7 +69,8 @@ async function main() {
 
     // Save results
     const filename = `results-${keyword}-full-${Date.now()}.json`;
-    await Bun.write(filename, JSON.stringify(results, null, 2));
+    const { writeFileSync } = await import('fs');
+    writeFileSync(filename, JSON.stringify(results, null, 2));
     console.log(`\nFull results saved to: ${filename}`);
 
   } catch (error) {

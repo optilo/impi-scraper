@@ -1,10 +1,10 @@
 /**
  * Integration tests for proxy support, external IP detection, and IPFoxy provider
  *
- * Run with: bun test tests/proxy.integration.test.ts
+ * Run with: pnpm test:proxy
  */
 
-import { describe, test, expect } from 'bun:test';
+import { describe, test, expect } from 'vitest';
 import { searchTrademarks, IMPIScraper, testProxy, fetchProxiesFromEnv, parseProxyProviderFromEnv } from '../src/index';
 
 describe('External IP Detection', () => {

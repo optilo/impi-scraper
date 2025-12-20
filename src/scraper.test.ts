@@ -2,7 +2,7 @@
  * Unit tests for IMPIScraper
  */
 
-import { describe, test, expect } from 'bun:test';
+import { describe, test, expect } from 'vitest';
 import { IMPIScraper, searchTrademarks } from './index';
 
 describe('IMPIScraper', () => {

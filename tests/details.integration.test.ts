@@ -1,10 +1,10 @@
 /**
  * Integration tests for full details fetching
  *
- * Run with: bun test tests/details.integration.test.ts --timeout 180000
+ * Run with: pnpm test:details --testTimeout=180000
  */
 
-import { describe, test, expect } from 'bun:test';
+import { describe, test, expect } from 'vitest';
 import { IMPIScraper } from '../src/index';
 
 // ISO date format regex: YYYY-MM-DD

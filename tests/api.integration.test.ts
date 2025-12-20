@@ -1,7 +1,7 @@
 /**
  * Integration tests for API-only mode
  *
- * Run with: bun test tests/api.integration.test.ts --timeout 180000
+ * Run with: pnpm test:integration --testTimeout=180000
  *
  * Tests the direct API approach:
  * 1. Boot browser once to get session tokens
@@ -9,7 +9,7 @@
  * 3. Much faster than full browser scraping
  */
 
-import { describe, test, expect, afterAll } from 'bun:test';
+import { describe, test, expect, afterAll } from 'vitest';
 import { IMPIApiClient } from '../src/api';
 
 // ISO date format regex

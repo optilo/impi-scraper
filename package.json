@@ -23,20 +23,20 @@
     "README.md"
   ],
   "scripts": {
-    "search": "bun cli.ts search",
-    "test": "bun test src/",
-    "test:watch": "bun test src/ --watch",
-    "test:integration": "bun test tests/ --timeout 180000",
-    "test:search": "bun test tests/search.integration.test.ts --timeout 120000",
-    "test:details": "bun test tests/details.integration.test.ts --timeout 180000",
-    "test:proxy": "bun test tests/proxy.integration.test.ts --timeout 120000",
-    "example:vitrum": "bun examples/search-vitrum.ts",
-    "example:full": "bun examples/full-details.ts",
+    "search": "tsx cli.ts search",
+    "test": "vitest run src/",
+    "test:watch": "vitest watch src/",
+    "test:integration": "vitest run tests/ --testTimeout=180000",
+    "test:search": "vitest run tests/search.integration.test.ts --testTimeout=120000",
+    "test:details": "vitest run tests/details.integration.test.ts --testTimeout=180000",
+    "test:proxy": "vitest run tests/proxy.integration.test.ts --testTimeout=120000",
+    "example:vitrum": "tsx examples/search-vitrum.ts",
+    "example:full": "tsx examples/full-details.ts",
     "typecheck": "tsc --noEmit",
-    "release": "bun scripts/release.ts",
-    "release:patch": "bun scripts/release.ts patch",
-    "release:minor": "bun scripts/release.ts minor",
-    "release:major": "bun scripts/release.ts major"
+    "release": "tsx scripts/release.ts",
+    "release:patch": "tsx scripts/release.ts patch",
+    "release:minor": "tsx scripts/release.ts minor",
+    "release:major": "tsx scripts/release.ts major"
   },
   "keywords": [
     "impi",
@@ -56,11 +56,13 @@
     "url": "https://github.com/optilo/impi-scraper"
   },
   "engines": {
-    "bun": ">=1.0.0"
+    "node": ">=18.0.0"
   },
   "devDependencies": {
-    "@types/bun": "latest",
-    "tsx": "^4.21.0"
+    "@types/node": "^20.0.0",
+    "dotenv": "^17.2.3",
+    "tsx": "^4.21.0",
+    "vitest": "^1.6.0"
   },
   "peerDependencies": {
     "typescript": "^5"

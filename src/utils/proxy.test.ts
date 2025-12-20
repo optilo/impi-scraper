@@ -2,7 +2,7 @@
  * Tests for proxy utilities
  */
 
-import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
+import { describe, test, expect, beforeEach, afterEach } from 'vitest';
 import { parseProxyUrl, parseProxyFromEnv, resolveProxyConfig, formatProxyForCamoufox } from './proxy';
 import type { ProxyConfig } from '../types';
 

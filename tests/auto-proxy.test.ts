@@ -1,10 +1,10 @@
 /**
  * Tests for auto-proxy feature
  *
- * Run: bun test tests/auto-proxy.test.ts
+ * Run: pnpm test tests/auto-proxy.test.ts
  */
 
-import { test, expect, describe, beforeAll } from 'bun:test';
+import { test, expect, describe, beforeAll } from 'vitest';
 import { parseProxyProviderFromEnv, fetchProxiesFromEnv } from '../src/utils/proxy-provider';
 
 describe('Auto-proxy feature', () => {

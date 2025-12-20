@@ -2,7 +2,7 @@
  * Unit tests for data utilities
  */
 
-import { describe, test, expect } from 'bun:test';
+import { describe, test, expect } from 'vitest';
 import { parseDate, sanitizeFilename, sleep } from './data';
 
 describe('parseDate', () => {

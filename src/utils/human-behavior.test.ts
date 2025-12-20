@@ -2,7 +2,7 @@
  * Unit tests for human behavior utilities
  */
 
-import { describe, test, expect } from 'bun:test';
+import { describe, test, expect } from 'vitest';
 import { randomDelay, RateLimiter } from './human-behavior';
 
 describe('randomDelay', () => {

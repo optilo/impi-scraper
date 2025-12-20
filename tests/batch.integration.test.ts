@@ -1,7 +1,7 @@
 /**
  * Integration tests for batch search
  *
- * Run with: bun test tests/batch.integration.test.ts --timeout 180000
+ * Run with: pnpm test:integration tests/batch.integration.test.ts --testTimeout=180000
  *
  * Tests batch search functionality with:
  * - Multiple results with pagination (tiptop: ~14 results)
@@ -9,7 +9,7 @@
  * - Zero results (77bet: 0 results)
  */
 
-import { describe, test, expect } from 'bun:test';
+import { describe, test, expect } from 'vitest';
 import { IMPIScraper } from '../src/index';
 
 // Test keywords from production database

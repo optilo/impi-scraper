@@ -135,7 +135,7 @@ export class IMPIScraper {
       rateLimitMs: 2000,
       maxConcurrency: 1,
       maxRetries: 3,
-      humanBehavior: false,
+      humanBehavior: true,
       detailLevel: 'basic',
       maxResults: 0, // 0 = no limit
       detailTimeoutMs: 30000, // 30 seconds per detail fetch
@@ -166,10 +166,15 @@ export class IMPIScraper {
       if (envProxy) {
         log.info(`IPFoxy auto-fetch failed, using proxy from environment: ${envProxy.server}`);
         this.options.proxy = envProxy;
+        return;
       } else {
-        log.warning('Auto-proxy: IPFoxy fetch failed and no proxy in environment. Continuing without proxy.');
+        throw new Error(
+          'Proxy required but not available.\n' +
+          '  - Set IPFOXY_API_TOKEN environment variable for auto-fetch\n' +
+          '  - Or set IMPI_PROXY_URL, PROXY_URL, HTTP_PROXY, or HTTPS_PROXY\n' +
+          '  - Or provide proxy via options: { proxy: { server: "http://host:port" } }'
+        );
       }
-      return;
     }
 
     const proxy = result.proxies[0];
@@ -248,6 +253,11 @@ export class IMPIScraper {
       headless: this.options.headless,
       geoip: true,
       proxy: formattedProxy,
+      // Additional options for better proxy compatibility
+      args: [
+        '--disable-blink-features=AutomationControlled',
+        '--disable-dev-shm-usage',
+      ],
     });
   }
 

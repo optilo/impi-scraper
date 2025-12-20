@@ -1,13 +1,13 @@
 /**
  * Integration tests for keyword search
  *
- * Run with: bun test tests/search.integration.test.ts --timeout 120000
+ * Run with: pnpm test:search --testTimeout=120000
  *
  * Note: Tests run sequentially due to Crawlee's global state.
  * Each test creates a fresh memory storage to avoid conflicts.
  */
 
-import { describe, test, expect } from 'bun:test';
+import { describe, test, expect } from 'vitest';
 import { searchTrademarks } from '../src/index';
 
 // ISO date format regex: YYYY-MM-DD

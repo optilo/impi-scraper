@@ -10,7 +10,7 @@ import type { ProxyConfig } from '../types';
 export interface ProxyProviderConfig {
   provider: 'ipfoxy';
   apiToken: string;
-  host?: string;      // Default: gate-sg.ipfoxy.io
+  host?: string;      // Default: gate-us.ipfoxy.io
   port?: number;      // Default: 58688
   country?: string;   // Country code filter (e.g., 'MX', 'US')
 }
@@ -42,7 +42,7 @@ export async function fetchIPFoxyProxies(
   config: ProxyProviderConfig,
   count: number = 1
 ): Promise<ProxyProviderResult> {
-  const host = config.host || 'gate-sg.ipfoxy.io';
+  const host = config.host || 'gate-us.ipfoxy.io';
   const port = config.port || 58688;
 
   // Build API URL - use JSON format for structured response
@@ -110,7 +110,7 @@ export function parseProxyProviderFromEnv(): ProxyProviderConfig | undefined {
   return {
     provider: 'ipfoxy',
     apiToken,
-    host: process.env.IPFOXY_HOST || 'gate-sg.ipfoxy.io',
+    host: process.env.IPFOXY_HOST || 'gate-us.ipfoxy.io',
     port: process.env.IPFOXY_PORT ? parseInt(process.env.IPFOXY_PORT, 10) : 58688,
     country: process.env.IPFOXY_COUNTRY,
   };

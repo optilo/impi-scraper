@@ -1,10 +1,10 @@
 /**
  * Tests for Camoufox integration and auto-proxy default behavior
  *
- * Run: bun test tests/camoufox-proxy.test.ts --timeout 120000
+ * Run: pnpm test tests/camoufox-proxy.test.ts --testTimeout=120000
  */
 
-import { test, expect, describe, beforeAll } from 'bun:test';
+import { test, expect, describe, beforeAll } from 'vitest';
 import { formatProxyForCamoufox } from '../src/utils/proxy';
 import type { ProxyConfig } from '../src/types';
 import { IMPIScraper } from '../src/scraper';

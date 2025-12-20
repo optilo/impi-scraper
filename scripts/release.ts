@@ -1,15 +1,37 @@
-#!/usr/bin/env bun
+#!/usr/bin/env tsx
 /**
  * Release script - bumps version, commits, tags, and pushes
  *
  * Usage:
- *   bun scripts/release.ts patch   # 2.2.0 -> 2.2.1
- *   bun scripts/release.ts minor   # 2.2.0 -> 2.3.0
- *   bun scripts/release.ts major   # 2.2.0 -> 3.0.0
- *   bun scripts/release.ts 2.5.0   # explicit version
+ *   pnpm run release:patch   # 2.2.0 -> 2.2.1
+ *   pnpm run release:minor   # 2.2.0 -> 2.3.0
+ *   pnpm run release:major   # 2.2.0 -> 3.0.0
+ *   pnpm run release 2.5.0   # explicit version
  */
 
-import { $ } from "bun";
+import { execSync } from 'child_process';
+import { readFileSync, writeFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+function exec(command: string, options?: { quiet?: boolean }): string {
+  try {
+    const output = execSync(command, { 
+      encoding: 'utf-8',
+      stdio: options?.quiet ? 'pipe' : 'inherit',
+      cwd: join(__dirname, '..')
+    });
+    return output as string;
+  } catch (error) {
+    if (!options?.quiet) {
+      throw error;
+    }
+    return '';
+  }
+}
 
 type BumpType = 'major' | 'minor' | 'patch';
 
@@ -40,12 +62,12 @@ async function main() {
   const bumpType = process.argv[2];
 
   if (!bumpType) {
-    console.error('Usage: bun scripts/release.ts <patch|minor|major|x.y.z>');
+    console.error('Usage: pnpm run release <patch|minor|major|x.y.z>');
     process.exit(1);
   }
 
   // Check for uncommitted changes
-  const status = await $`git status --porcelain`.text();
+  const status = exec('git status --porcelain', { quiet: true });
   if (status.trim()) {
     console.error('Error: Working directory has uncommitted changes');
     console.error('Please commit or stash changes before releasing');
@@ -53,7 +75,8 @@ async function main() {
   }
 
   // Read current version
-  const pkg = await Bun.file('package.json').json();
+  const pkgPath = join(__dirname, '..', 'package.json');
+  const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
   const currentVersion = pkg.version;
   const newVersion = bumpVersion(currentVersion, bumpType);
 
@@ -61,41 +84,41 @@ async function main() {
 
   // Update package.json
   pkg.version = newVersion;
-  await Bun.write('package.json', JSON.stringify(pkg, null, 2) + '\n');
+  writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
   console.log('✓ Updated package.json');
 
   // Run tests
   console.log('⏳ Running tests...');
   try {
-    await $`bun test src/`.quiet();
+    exec('pnpm test', { quiet: true });
     console.log('✓ Tests passed');
   } catch {
     console.error('✗ Tests failed - aborting release');
-    await $`git checkout package.json`.quiet();
+    exec('git checkout package.json', { quiet: true });
     process.exit(1);
   }
 
   // Run typecheck
   console.log('⏳ Running typecheck...');
   try {
-    await $`bun run typecheck`.quiet();
+    exec('pnpm run typecheck', { quiet: true });
     console.log('✓ Typecheck passed');
   } catch {
     console.error('✗ Typecheck failed - aborting release');
-    await $`git checkout package.json`.quiet();
+    exec('git checkout package.json', { quiet: true });
     process.exit(1);
   }
 
   // Commit and tag
   const tag = `v${newVersion}`;
-  await $`git add package.json`;
-  await $`git commit -m ${'chore: release ' + tag}`;
-  await $`git tag ${tag}`;
+  exec('git add package.json');
+  exec(`git commit -m "chore: release ${tag}"`);
+  exec(`git tag ${tag}`);
   console.log(`✓ Created commit and tag: ${tag}`);
 
   // Push
   console.log('⏳ Pushing to origin...');
-  await $`git push origin main --tags`;
+  exec('git push origin main --tags');
   console.log('✓ Pushed to origin');
 
   console.log(`\n🎉 Released ${tag}!`);

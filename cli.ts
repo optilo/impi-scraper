@@ -1,11 +1,11 @@
-#!/usr/bin/env bun
+#!/usr/bin/env tsx
 /**
  * IMPI Scraper CLI
  *
  * Usage:
- *   bun cli.ts search <keyword>           # Basic keyword search
- *   bun cli.ts search <keyword> --full    # Search with full details
- *   bun cli.ts details <impi-id>          # Get details for specific trademark
+ *   pnpm run search <keyword>           # Basic keyword search
+ *   tsx cli.ts search <keyword> --full    # Search with full details
+ *   tsx cli.ts details <impi-id>          # Get details for specific trademark
  *
  * Options:
  *   --full, -f          Fetch full details (owners, classes, history)
@@ -16,10 +16,13 @@
  *   --help, -h          Show this help message
  *
  * Examples:
- *   bun cli.ts search vitrum
- *   bun cli.ts search "coca cola" --full -o results.json
- *   bun cli.ts search nike --limit 5 --visible
+ *   pnpm run search vitrum
+ *   tsx cli.ts search "coca cola" --full -o results.json
+ *   tsx cli.ts search nike --limit 5 --visible
  */
+
+// Load .env file (Node.js doesn't auto-load like Bun)
+import 'dotenv/config';
 
 import { parseArgs } from 'util';
 import { IMPIApiClient, IMPIConcurrentPool, IMPIScraper } from './src/index';
@@ -31,9 +34,9 @@ const HELP = `
 IMPI Trademark Scraper CLI
 
 USAGE:
-  bun cli.ts search <keyword> [options]
-  bun cli.ts search-many <keyword1> <keyword2> ... [options]
-  bun cli.ts fetch-proxies [count]
+  pnpm run search <keyword> [options]
+  tsx cli.ts search-many <keyword1> <keyword2> ... [options]
+  tsx cli.ts fetch-proxies [count]
 
 COMMANDS:
   search <keyword>         Search trademarks by keyword
@@ -62,28 +65,28 @@ ENVIRONMENT VARIABLES:
 
 EXAMPLES:
   # Basic search
-  bun cli.ts search vitrum
+  pnpm run search vitrum
 
   # Full details with output file
-  bun cli.ts search "coca cola" --full -o coca-cola.json
+  tsx cli.ts search "coca cola" --full -o coca-cola.json
 
   # Quick search with visible browser, limited results
-  bun cli.ts search nike --visible --limit 5
+  tsx cli.ts search nike --visible --limit 5
 
   # Table format output
-  bun cli.ts search vitrum --format table
+  tsx cli.ts search vitrum --format table
 
   # Search with auto-fetched proxy (requires IPFOXY_API_TOKEN)
-  bun cli.ts search vitrum --proxy
+  tsx cli.ts search vitrum --proxy
 
   # Search with explicit proxy URL
-  bun cli.ts search vitrum --proxy http://user:pass@proxy.example.com:8080
+  tsx cli.ts search vitrum --proxy http://user:pass@proxy.example.com:8080
 
   # Concurrent search with multiple proxies (requires IPFOXY_API_TOKEN)
-  bun cli.ts search-many nike adidas puma --concurrency 3
+  tsx cli.ts search-many nike adidas puma --concurrency 3
 
   # Debug mode (saves screenshots on CAPTCHA/blocking)
-  bun cli.ts search vitrum --debug --visible
+  tsx cli.ts search vitrum --debug --visible
 `;
 
 interface CLIOptions {
@@ -103,7 +106,7 @@ interface CLIOptions {
 }
 
 function parseCliArgs(): { command: string; keywords: string[]; options: CLIOptions } {
-  const rawArgs = Bun.argv.slice(2);
+  const rawArgs = process.argv.slice(2);
 
   // Detect --proxy or -p without a URL value (for auto-fetch)
   // We need to check if --proxy/−p appears and the next arg is missing or is another flag
@@ -132,7 +135,7 @@ function parseCliArgs(): { command: string; keywords: string[]; options: CLIOpti
       output: { type: 'string', short: 'o' },
       visible: { type: 'boolean', short: 'v', default: false },
       browser: { type: 'boolean', default: false },
-      human: { type: 'boolean', default: false },
+      human: { type: 'boolean', default: true },
       limit: { type: 'string', short: 'l' },
       format: { type: 'string', default: 'json' },
       proxy: { type: 'string', short: 'p' },
@@ -338,7 +341,8 @@ async function runSearch(keyword: string, options: CLIOptions): Promise<void> {
 
   // Output to file or stdout
   if (options.output) {
-    await Bun.write(options.output, output);
+    const { writeFileSync } = await import('fs');
+    writeFileSync(options.output, output);
     console.error(`Results saved to: ${options.output}`);
   } else {
     console.log(output);
@@ -443,7 +447,8 @@ async function runConcurrentSearch(keywords: string[], options: CLIOptions): Pro
     }, null, 2);
 
     if (options.output) {
-      await Bun.write(options.output, output);
+      const { writeFileSync } = await import('fs');
+      writeFileSync(options.output, output);
       console.error(`\nResults saved to: ${options.output}`);
     } else {
       console.log(output);
@@ -470,7 +475,7 @@ async function main(): Promise<void> {
   if (command === 'search-many') {
     if (keywords.length === 0) {
       console.error('Error: at least one keyword is required');
-      console.error('Usage: bun cli.ts search-many <keyword1> <keyword2> ...');
+      console.error('Usage: tsx cli.ts search-many <keyword1> <keyword2> ...');
       process.exit(1);
     }
     try {
@@ -491,7 +496,7 @@ async function main(): Promise<void> {
   const keyword = keywords.join(' ');
   if (!keyword) {
     console.error('Error: keyword is required');
-    console.error('Usage: bun cli.ts search <keyword>');
+    console.error('Usage: pnpm run search <keyword> or tsx cli.ts search <keyword>');
     process.exit(1);
   }
 

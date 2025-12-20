@@ -20,10 +20,10 @@ A TypeScript scraper for IMPI (Instituto Mexicano de la Propiedad Industrial) - 
 
 ```bash
 # Install dependencies
-bun install
+pnpm install
 
 # Install Playwright browser (first time only)
-bunx playwright install chromium
+pnpm exec playwright install chromium
 ```
 
 ## CLI Usage
@@ -32,47 +32,49 @@ The easiest way to use the scraper:
 
 ```bash
 # Basic keyword search
-bun cli.ts search vitrum
+pnpm run search vitrum
 
 # Search with full details (owners, classes, history)
-bun cli.ts search vitrum --full
+tsx cli.ts search vitrum --full
 
 # Output to file
-bun cli.ts search "coca cola" -o results.json
+tsx cli.ts search "coca cola" -o results.json
 
 # Table format output
-bun cli.ts search nike --format table
+tsx cli.ts search nike --format table
 
 # Summary format
-bun cli.ts search nike --format summary
+tsx cli.ts search nike --format summary
 
 # Show browser window (useful for debugging)
-bun cli.ts search vitrum --visible
+tsx cli.ts search vitrum --visible
 
 # Enable human-like behavior (slower but less detectable)
-bun cli.ts search vitrum --human
+tsx cli.ts search vitrum --human
 
 # Limit results
-bun cli.ts search nike --limit 5
+tsx cli.ts search nike --limit 5
 
 # Search with proxy
-bun cli.ts search vitrum --proxy http://user:pass@proxy.example.com:8080
+tsx cli.ts search vitrum --proxy http://user:pass@proxy.example.com:8080
 
 # Using environment variable for proxy
-IMPI_PROXY_URL=http://proxy:8080 bun cli.ts search vitrum
+IMPI_PROXY_URL=http://proxy:8080 tsx cli.ts search vitrum
 ```
 
 ### CLI Commands
 
 ```bash
 # Search trademarks (single keyword)
-bun cli.ts search <keyword> [options]
+pnpm run search <keyword> [options]
+# or
+tsx cli.ts search <keyword> [options]
 
 # Concurrent search (multiple keywords with multiple proxies)
-bun cli.ts search-many <keyword1> <keyword2> ... [options]
+tsx cli.ts search-many <keyword1> <keyword2> ... [options]
 
 # Fetch fresh proxies from IPFoxy
-bun cli.ts fetch-proxies [count]
+tsx cli.ts fetch-proxies [count]
 ```
 
 ### CLI Options
@@ -108,17 +110,17 @@ See `.env.example` for detailed configuration options.
 
 **JSON** (default): Full structured data
 ```bash
-bun cli.ts search vitrum
+pnpm run search vitrum
 ```
 
 **Table**: Quick overview in terminal
 ```bash
-bun cli.ts search vitrum --format table
+pnpm run search vitrum --format table
 ```
 
 **Summary**: Human-readable summary
 ```bash
-bun cli.ts search vitrum --format summary
+pnpm run search vitrum --format summary
 ```
 
 ## Concurrent Search
@@ -127,10 +129,10 @@ For high-volume searches, use `search-many` with multiple workers. Each worker g
 
 ```bash
 # Search 5 keywords with 3 concurrent workers (fetches 3 proxies automatically)
-bun cli.ts search-many nike adidas puma reebok converse --concurrency 3
+tsx cli.ts search-many nike adidas puma reebok converse --concurrency 3
 
 # With full details
-bun cli.ts search-many nike adidas puma --concurrency 3 --full -o results.json
+tsx cli.ts search-many nike adidas puma --concurrency 3 --full -o results.json
 ```
 
 **Requirements:**
@@ -247,7 +249,7 @@ For high-volume scraping, use the built-in [IPFoxy](https://www.ipfoxy.com/) int
 
 3. **Test it works:**
    ```bash
-   bun cli.ts fetch-proxies 1
+   tsx cli.ts fetch-proxies 1
    ```
 
 ### How It Works
@@ -255,7 +257,7 @@ For high-volume scraping, use the built-in [IPFoxy](https://www.ipfoxy.com/) int
 IPFoxy uses session-based IP rotation. Each proxy returned has a unique session ID suffix (`_10000`, `_10001`, etc.) that routes through a different IP:
 
 ```bash
-$ bun cli.ts fetch-proxies 3
+$ tsx cli.ts fetch-proxies 3
 
 ✅ Fetched 3 proxy(ies):
 Proxy 1: Server: http://gate-sg.ipfoxy.io:58688
@@ -340,7 +342,7 @@ Run the integration tests to verify proxy functionality:
 
 ```bash
 # Test IPFoxy API + proxy connectivity
-bun test tests/proxy.integration.test.ts
+pnpm test tests/proxy.integration.test.ts
 ```
 
 This tests:
@@ -539,18 +541,18 @@ interface IMPIError extends Error {
 
 ```bash
 # Run unit tests (fast, no network)
-bun test src/
+pnpm test src/
 
 # Run all integration tests (requires network, slow)
-bun test:integration
+pnpm test:integration
 
 # Run specific integration tests
-bun test:search     # Keyword search tests
-bun test:details    # Full details tests
-bun test:proxy      # IPFoxy API + proxy connectivity tests
+pnpm test:search     # Keyword search tests
+pnpm test:details    # Full details tests
+pnpm test:proxy      # IPFoxy API + proxy connectivity tests
 
 # Watch mode for development
-bun test:watch
+pnpm test:watch
 ```
 
 ## Project Structure
@@ -608,7 +610,7 @@ In your project's `package.json`:
 Then install and import:
 
 ```bash
-bun install
+pnpm install
 ```
 
 ```typescript
@@ -625,12 +627,12 @@ git submodule add <repo-url> packages/impi-scraper
 
 | Script | Description |
 |--------|-------------|
-| `bun run search <keyword>` | Quick search shortcut |
-| `bun test` | Run unit tests |
-| `bun test:integration` | Run all integration tests |
-| `bun test:search` | Run search integration tests |
-| `bun test:details` | Run details integration tests |
-| `bun test:proxy` | Run proxy/IPFoxy integration tests |
+| `pnpm run search <keyword>` | Quick search shortcut |
+| `pnpm test` | Run unit tests |
+| `pnpm test:integration` | Run all integration tests |
+| `pnpm test:search` | Run search integration tests |
+| `pnpm test:details` | Run details integration tests |
+| `pnpm test:proxy` | Run proxy/IPFoxy integration tests |
 
 ## Notes
 

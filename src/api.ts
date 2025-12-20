@@ -127,7 +127,7 @@ export class IMPIApiClient {
       rateLimitMs: 2000,
       maxConcurrency: 1,
       maxRetries: 3,
-      humanBehavior: false,
+      humanBehavior: true,
       detailLevel: 'basic',
       maxResults: 0,
       detailTimeoutMs: 30000,
@@ -160,10 +160,15 @@ export class IMPIApiClient {
       if (envProxy) {
         log.info(`IPFoxy auto-fetch failed, using proxy from environment: ${envProxy.server}`);
         this.options.proxy = envProxy;
+        return;
       } else {
-        log.warning('Auto-proxy: IPFoxy fetch failed and no proxy in environment. Continuing without proxy.');
+        throw new Error(
+          'Proxy required but not available.\n' +
+          '  - Set IPFOXY_API_TOKEN environment variable for auto-fetch\n' +
+          '  - Or set IMPI_PROXY_URL, PROXY_URL, HTTP_PROXY, or HTTPS_PROXY\n' +
+          '  - Or provide proxy via options: { proxy: { server: "http://host:port" } }'
+        );
       }
-      return;
     }
 
     const proxy = result.proxies[0];
@@ -190,12 +195,20 @@ export class IMPIApiClient {
     const formattedProxy = formatProxyForCamoufox(this.options.proxy);
     if (this.options.proxy) {
       log.info(`Using proxy: ${this.options.proxy.server}`);
+      if (this.options.proxy.username) {
+        log.debug(`Proxy username: ${this.options.proxy.username.substring(0, 50)}...`);
+      }
     }
 
     this.browser = await Camoufox({
       headless: this.options.headless,
       geoip: true,
       proxy: formattedProxy,
+      // Additional options for better proxy compatibility
+      args: [
+        '--disable-blink-features=AutomationControlled',
+        '--disable-dev-shm-usage',
+      ],
     });
     if (!this.browser) {
       throw new Error('Failed to create Camoufox browser');
@@ -211,8 +224,94 @@ export class IMPIApiClient {
     }
 
     // Navigate to search page to establish session
-    await this.page.goto(IMPI_CONFIG.searchUrl, { waitUntil: 'networkidle' });
-    await randomDelay(500, 1000);
+    // Retry logic for connection issues (IMPI sometimes refuses proxy connections)
+    let lastError: Error | null = null;
+    const maxRetries = 3;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        log.debug(`Navigation attempt ${attempt}/${maxRetries} to ${IMPI_CONFIG.searchUrl}`);
+        await this.page.goto(IMPI_CONFIG.searchUrl, { 
+          waitUntil: 'networkidle',
+          timeout: 60000 
+        });
+        await randomDelay(500, 1000);
+        lastError = null;
+        break; // Success, exit retry loop
+      } catch (err) {
+        lastError = err as Error;
+        const errorMsg = lastError.message.toLowerCase();
+        
+        // If it's a connection refused error, try fetching a new proxy
+        if (errorMsg.includes('connection_refused') || errorMsg.includes('ns_error_connection_refused')) {
+          if (attempt < maxRetries) {
+            log.warning(`Connection refused on attempt ${attempt}, fetching new proxy and retrying...`);
+            
+            // Close current browser
+            if (this.browser) {
+              await this.browser.close().catch(() => {});
+              this.browser = null;
+              this.context = null;
+              this.page = null;
+            }
+            
+            // Fetch a fresh proxy (with a small delay to get a different one)
+            await randomDelay(1000, 2000);
+            this.proxyResolved = false;
+            await this.resolveAutoProxy();
+            
+            if (this.options.proxy) {
+              log.info(`Retry with new proxy: ${this.options.proxy.server}`);
+              if (this.options.proxy.username) {
+                log.debug(`New proxy username: ${this.options.proxy.username.substring(0, 50)}...`);
+              }
+            }
+            
+            // Create new browser with new proxy
+            const formattedProxy = formatProxyForCamoufox(this.options.proxy);
+            this.browser = await Camoufox({
+              headless: this.options.headless,
+              geoip: true,
+              proxy: formattedProxy,
+            });
+            if (!this.browser) {
+              throw new Error('Failed to create Camoufox browser');
+            }
+            this.context = await this.browser.newContext({
+              userAgent: IMPI_CONFIG.userAgent,
+            });
+            this.page = await this.context.newPage();
+            
+            if (this.options.humanBehavior && this.page) {
+              // @ts-expect-error - Playwright type compatibility between versions
+              await addHumanBehavior(this.page);
+            }
+            
+            // Wait before retry
+            await randomDelay(2000, 3000);
+            continue;
+          }
+        }
+        
+        // For other errors or final attempt, throw
+        if (attempt === maxRetries) {
+          throw new Error(
+            `Failed to connect to IMPI after ${maxRetries} attempts: ${lastError.message}\n` +
+            `  This may indicate:\n` +
+            `  - IMPI is blocking the proxy IP\n` +
+            `  - Network connectivity issues\n` +
+            `  - Proxy authentication problems\n` +
+            `  Try fetching a new proxy or using a different proxy server.`
+          );
+        }
+        
+        // Wait before retry for other errors
+        await randomDelay(1000, 2000);
+      }
+    }
+    
+    if (lastError) {
+      throw lastError;
+    }
 
     // Extract session tokens from cookies
     const cookies = await this.context.cookies();
@@ -407,92 +506,195 @@ export class IMPIApiClient {
       }
     }
 
-    // Intercept the search API response
+    // Intercept the search API response with retry logic
     let searchResponse: IMPISearchResponse | null = null;
-    let resolveSearch: () => void;
-    const searchPromise = new Promise<void>((resolve) => {
-      resolveSearch = resolve;
-    });
+    const maxRetries = 3;
+    let lastError: Error | null = null;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      let responseHandler: ((response: any) => Promise<void>) | null = null;
+      
+      try {
+        let resolveSearch: () => void;
+        const searchPromise = new Promise<void>((resolve) => {
+          resolveSearch = resolve;
+        });
 
-    const responseHandler = async (response: any) => {
-      const url = response.url();
-      if (url.includes('/marcas/search/internal')) {
-        try {
-          const data = await response.json();
-          if (data.resultPage) {
-            searchResponse = data;
-            resolveSearch();
+        responseHandler = async (response: any) => {
+          const url = response.url();
+          if (url.includes('/marcas/search/internal')) {
+            try {
+              const data = await response.json();
+              if (data.resultPage) {
+                searchResponse = data;
+                resolveSearch();
+              }
+            } catch {}
           }
-        } catch {}
-      }
-    };
+        };
 
-    this.page!.on('response', responseHandler);
+        this.page!.on('response', responseHandler);
 
-    try {
-      // Navigate and search
-      await this.page!.goto(IMPI_CONFIG.searchUrl, { waitUntil: 'networkidle' });
-      await randomDelay(300, 600);
+        // Navigate and search with retry on connection errors
+        await this.page!.goto(IMPI_CONFIG.searchUrl, { 
+          waitUntil: 'networkidle',
+          timeout: 60000 
+        });
+        await randomDelay(300, 600);
 
-      const searchInput = await this.page!.waitForSelector('input[name="quick"], input[type="text"]', {
-        timeout: 10000
-      });
+        const searchInput = await this.page!.waitForSelector('input[name="quick"], input[type="text"]', {
+          timeout: 10000
+        });
 
-      if (!searchInput) {
-        throw createError('PARSE_ERROR', 'Search input not found', { url: IMPI_CONFIG.searchUrl });
-      }
-
-      await searchInput.click();
-
-      if (this.options.humanBehavior) {
-        await searchInput.type(query, { delay: 30 });
-      } else {
-        await searchInput.fill(query);
-      }
-
-      await randomDelay(100, 300);
-      await searchInput.press('Enter');
-
-      // Wait for response with timeout
-      const timeoutPromise = new Promise<void>((_, reject) => {
-        setTimeout(() => reject(new Error('Search timeout')), 30000);
-      });
-
-      await Promise.race([searchPromise, timeoutPromise]).catch(() => {});
-
-      // Wait for page to settle
-      await this.page!.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
-      await randomDelay(500, 1000);
-
-      // Extract searchId from URL
-      const currentUrl = this.page!.url();
-      const searchIdMatch = currentUrl.match(/[?&]s=([a-f0-9-]+)/i);
-      const searchId = searchIdMatch ? searchIdMatch[1]! : '';
-
-      // Check for no results
-      if (!searchResponse) {
-        const bodyText = await this.page!.textContent('body').catch(() => '') || '';
-        if (bodyText.toLowerCase().includes('no hay resultados') ||
-            bodyText.toLowerCase().includes('considera realizar una nueva búsqueda')) {
-          return { searchId: '', totalResults: 0 };
+        if (!searchInput) {
+          throw createError('PARSE_ERROR', 'Search input not found', { url: IMPI_CONFIG.searchUrl });
         }
-        throw createError('PARSE_ERROR', 'Failed to get search results', { url: currentUrl });
-      }
 
-      // TypeScript doesn't track closure mutations, so we need to help it
-      const response = searchResponse as IMPISearchResponse;
-      return {
-        searchId,
-        totalResults: response.totalResults || response.resultPage.length
-      };
-    } finally {
-      this.page!.off('response', responseHandler);
+        await searchInput.click();
 
-      // Close browser if not keeping open
-      if (!this.options.keepBrowserOpen) {
-        await this.closeBrowser();
+        if (this.options.humanBehavior) {
+          await searchInput.type(query, { delay: 30 });
+        } else {
+          await searchInput.fill(query);
+        }
+
+        await randomDelay(100, 300);
+        await searchInput.press('Enter');
+
+        // Wait for response with timeout
+        const timeoutPromise = new Promise<void>((_, reject) => {
+          setTimeout(() => reject(new Error('Search timeout')), 30000);
+        });
+
+        await Promise.race([searchPromise, timeoutPromise]).catch(() => {});
+
+        // Wait for page to settle
+        await this.page!.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+        await randomDelay(500, 1000);
+
+        // Extract searchId from URL
+        const currentUrl = this.page!.url();
+        const searchIdMatch = currentUrl.match(/[?&]s=([a-f0-9-]+)/i);
+        const searchId = searchIdMatch ? searchIdMatch[1]! : '';
+
+        // Check for no results
+        if (!searchResponse) {
+          const bodyText = await this.page!.textContent('body').catch(() => '') || '';
+          if (bodyText.toLowerCase().includes('no hay resultados') ||
+              bodyText.toLowerCase().includes('considera realizar una nueva búsqueda')) {
+            if (responseHandler) {
+              this.page!.off('response', responseHandler);
+            }
+            return { searchId: '', totalResults: 0 };
+          }
+          throw createError('PARSE_ERROR', 'Failed to get search results', { url: currentUrl });
+        }
+
+        // TypeScript doesn't track closure mutations, so we need to help it
+        const response = searchResponse as IMPISearchResponse;
+        if (responseHandler) {
+          this.page!.off('response', responseHandler);
+        }
+        
+        // Close browser if not keeping open
+        if (!this.options.keepBrowserOpen) {
+          await this.closeBrowser();
+        }
+        
+        return {
+          searchId,
+          totalResults: response.totalResults || response.resultPage.length
+        };
+      } catch (err) {
+        if (responseHandler) {
+          this.page!.off('response', responseHandler);
+        }
+        
+        lastError = err as Error;
+        const errorMsg = lastError.message.toLowerCase();
+        
+        // If connection refused, try fetching a new proxy
+        if ((errorMsg.includes('connection_refused') || errorMsg.includes('ns_error_connection_refused')) && attempt < maxRetries) {
+          log.warning(`Connection refused on attempt ${attempt}, fetching new proxy and retrying...`);
+          
+          // Close current browser
+          if (this.browser) {
+            await this.browser.close().catch(() => {});
+            this.browser = null;
+            this.context = null;
+            this.page = null;
+          }
+          
+          // Fetch a fresh proxy
+          this.proxyResolved = false;
+          await this.resolveAutoProxy();
+          
+          // Re-initialize session with new proxy
+          this.session = null;
+          await this.initSession();
+          
+          // Ensure browser is created
+          if (!this.browser) {
+            const formattedProxy = formatProxyForCamoufox(this.options.proxy);
+            this.browser = await Camoufox({
+              headless: this.options.headless,
+              geoip: true,
+              proxy: formattedProxy,
+            });
+            if (!this.browser) {
+              throw new Error('Failed to create Camoufox browser');
+            }
+            this.context = await this.browser.newContext({
+              userAgent: IMPI_CONFIG.userAgent,
+            });
+            
+            // Inject session cookies
+            await this.context.addCookies([
+              { name: 'XSRF-TOKEN', value: encodeURIComponent(this.session!.xsrfToken), domain: 'marcia.impi.gob.mx', path: '/' },
+              { name: 'JSESSIONID', value: this.session!.jsessionId, domain: 'marcia.impi.gob.mx', path: '/' },
+              { name: 'SESSIONTOKEN', value: this.session!.sessionToken, domain: 'marcia.impi.gob.mx', path: '/' },
+            ]);
+            
+            this.page = await this.context.newPage();
+            
+            if (this.options.humanBehavior && this.page) {
+              // @ts-expect-error - Playwright type compatibility between versions
+              await addHumanBehavior(this.page);
+            }
+          }
+          
+          // Wait before retry
+          await randomDelay(2000, 3000);
+          continue;
+        }
+        
+        // For other errors or final attempt, throw
+        if (attempt === maxRetries) {
+          // Close browser if not keeping open
+          if (!this.options.keepBrowserOpen) {
+            await this.closeBrowser();
+          }
+          throw new Error(
+            `Failed to perform quick search after ${maxRetries} attempts: ${lastError.message}\n` +
+            `  This may indicate:\n` +
+            `  - IMPI is blocking the proxy IP\n` +
+            `  - Network connectivity issues\n` +
+            `  - Proxy authentication problems\n` +
+            `  Try fetching a new proxy or using a different proxy server.`
+          );
+        }
+        
+        // Wait before retry for other errors
+        await randomDelay(1000, 2000);
       }
     }
+    
+    // Close browser if not keeping open
+    if (!this.options.keepBrowserOpen) {
+      await this.closeBrowser();
+    }
+    
+    throw lastError || new Error('Failed to perform quick search');
   }
 
   /**
@@ -868,7 +1070,7 @@ export class IMPIConcurrentPool {
       rateLimitMs: 2000,
       maxConcurrency: 1,
       maxRetries: 3,
-      humanBehavior: false,
+      humanBehavior: true,
       detailLevel: 'basic',
       maxResults: 0,
       detailTimeoutMs: 30000,

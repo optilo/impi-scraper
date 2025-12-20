@@ -2,7 +2,7 @@
  * Example: Search for "vitrum" trademarks
  * Demonstrates basic usage of the IMPI scraper
  *
- * Run with: bun examples/search-vitrum.ts
+ * Run with: pnpm example:vitrum
  */
 
 import { searchTrademarks } from '../src/index';
@@ -49,7 +49,8 @@ async function main() {
 
     // Save to JSON file
     const filename = `results-vitrum-${Date.now()}.json`;
-    await Bun.write(filename, JSON.stringify(results, null, 2));
+    const { writeFileSync } = await import('fs');
+    writeFileSync(filename, JSON.stringify(results, null, 2));
     console.log(`Results saved to: ${filename}`);
 
   } catch (error) {
