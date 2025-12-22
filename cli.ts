@@ -227,7 +227,7 @@ function parseCliArgs(): { command: string; keywords: string[]; options: CLIOpti
       autoProxy,
       concurrency: values.concurrency ? parseInt(values.concurrency as string, 10) : 1,
       debug: values.debug as boolean,
-      rateLimit: values['rate-limit'] ? parseInt(values['rate-limit'] as string, 10) : 100, // Default: 10 req/sec
+      rateLimit: values['rate-limit'] ? parseInt(values['rate-limit'] as string, 10) : 0,
       help: values.help as boolean,
     },
   };
@@ -343,9 +343,7 @@ async function runSearch(keyword: string, options: CLIOptions): Promise<void> {
   } else {
     console.error(`Proxy: from env or none`);
   }
-  if (!useBrowserMode) {
-    console.error(`Rate limit: ${options.rateLimit}ms (${(1000 / options.rateLimit).toFixed(1)} req/sec)`);
-  }
+  // no client-side rate limit output
   if (options.debug) {
     console.error(`Screenshots will be saved to ./screenshots on errors`);
   }
@@ -427,7 +425,8 @@ async function runConcurrentSearch(keywords: string[], options: CLIOptions): Pro
 
   console.error(`Concurrent search for ${keywords.length} keywords with ${concurrency} workers...`);
   console.error(`Keywords: ${keywords.join(', ')}`);
-  console.error(`Details: ${options.full ? 'full' : 'basic'} | Rate limit: ${options.rateLimit}ms`);
+  console.error(`Details: ${options.full ? 'full' : 'basic'}`);
+
 
   // Fetch proxies from provider (one per worker)
   const providerConfig = parseProxyProviderFromEnv();

@@ -98,7 +98,7 @@ tsx cli.ts fetch-proxies [count]
 | `--format` | | Output format: json, table, summary |
 | `--proxy URL` | `-p` | Proxy server URL |
 | `--concurrency NUM` | `-c` | Number of concurrent workers (default: 1) |
-| `--rate-limit NUM` | | API rate limit in ms (default: 500) |
+| `--rate-limit NUM` | | (deprecated) |
 | `--debug` | `-d` | Save screenshots on CAPTCHA/blocking detection |
 | `--help` | `-h` | Show help |
 
@@ -762,7 +762,7 @@ import { IMPIHttpClient, type GeneratedSearch } from '@optilo/impi-scraper';
 export async function processSearch(payload: GeneratedSearch) {
   // Pure HTTP client - NO Camoufox/Playwright needed
   const client = new IMPIHttpClient(payload.tokens, {
-    apiRateLimitMs: 200,  // Faster rate limit in serverless
+    apiRateLimitMs: 0,    // No client-side throttling
     detailLevel: 'basic'
   });
 
@@ -856,7 +856,7 @@ await processIMPISearch.trigger(search);
 
 ## Notes
 
-- The scraper respects rate limits to avoid overloading the IMPI server
+- Client-side rate limiting has been removed; rely on server responses for throttling
 - Human behavior simulation adds slight delays but helps avoid detection
 - Full detail mode makes additional API calls per result (slower but more data)
 - Results are returned in ISO date format (YYYY-MM-DD)

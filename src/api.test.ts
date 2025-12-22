@@ -363,34 +363,6 @@ describe('Pagination logic', () => {
   });
 });
 
-describe('Rate limiting', () => {
-  test('default rate limit is 500ms', () => {
-    const client = new IMPIApiClient();
-    // Access private options via any cast
-    const options = (client as any).options;
-
-    expect(options.apiRateLimitMs).toBe(500);
-  });
-
-  test('custom rate limit is respected', () => {
-    const client = new IMPIApiClient({ apiRateLimitMs: 1000 });
-    const options = (client as any).options;
-
-    expect(options.apiRateLimitMs).toBe(1000);
-  });
-
-  test('rate limit timing calculation', async () => {
-    const rateLimit = 500;
-    const lastRequest = Date.now() - 200; // 200ms ago
-    const elapsed = Date.now() - lastRequest;
-    const waitNeeded = rateLimit - elapsed;
-
-    // Should need to wait ~300ms more
-    expect(waitNeeded).toBeGreaterThan(0);
-    expect(waitNeeded).toBeLessThan(rateLimit);
-  });
-});
-
 describe('Session management', () => {
   test('session expiration check with JWT exp', () => {
     const now = Date.now();

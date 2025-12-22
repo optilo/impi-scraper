@@ -22,7 +22,7 @@ export interface IMPIErrorDetails {
   code: IMPIErrorCode;
   message: string;
   httpStatus?: number;
-  retryAfter?: number;    // Seconds to wait before retry (for rate limiting)
+  retryAfter?: number;    // Seconds to wait before retry
   url?: string;
   timestamp: string;
 }
@@ -78,7 +78,6 @@ export interface ProxyConfig {
 
 export interface IMPIScraperOptions {
   headless?: boolean;
-  rateLimitMs?: number;
   maxConcurrency?: number;
   maxRetries?: number;
   humanBehavior?: boolean;

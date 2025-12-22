@@ -23,9 +23,9 @@
     "README.md"
   ],
   "scripts": {
-    "search": "tsx --no-reload cli.ts search",
+    "search": "tsx cli.ts search",
     "search:node": "node --experimental-strip-types --experimental-specifier-resolution=node cli.ts search",
-    "count": "tsx --no-reload cli.ts count",
+    "count": "tsx cli.ts count",
     "count:node": "node --experimental-strip-types --experimental-specifier-resolution=node cli.ts count",
     "test": "vitest run src/",
     "test:watch": "vitest watch src/",

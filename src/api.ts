@@ -79,8 +79,6 @@ const IMPI_CONFIG = {
 // SessionTokens is now imported from types.ts
 
 export interface IMPIApiClientOptions extends IMPIScraperOptions {
-  /** Rate limit between API requests in ms (default: 500ms) */
-  apiRateLimitMs?: number;
   /** Keep browser open for token refresh (default: false) */
   keepBrowserOpen?: boolean;
   /** Session token refresh interval in ms (default: 25 minutes) */
@@ -123,7 +121,6 @@ export class IMPIApiClient {
   private browser: Browser | null = null;
   private context: BrowserContext | null = null;
   private page: Page | null = null;
-  private lastRequestTime = 0;
   private proxyResolved = false;
 
   constructor(options: IMPIApiClientOptions = {}) {
@@ -139,7 +136,6 @@ export class IMPIApiClient {
 
     this.options = {
       headless: true,
-      rateLimitMs: 2000,
       maxConcurrency: 1,
       maxRetries: 3,
       humanBehavior: true,
@@ -149,7 +145,6 @@ export class IMPIApiClient {
       browserTimeoutMs: 300000,
       debug: false,
       screenshotDir: './screenshots',
-      apiRateLimitMs: 500, // 2 requests per second - gentle
       keepBrowserOpen: false,
       tokenRefreshIntervalMs: 25 * 60 * 1000, // 25 minutes (JWT typically expires in 30min)
       ...options,
@@ -427,17 +422,6 @@ export class IMPIApiClient {
    */
   private async apiFetch(url: string, options: RequestInit = {}): Promise<Response> {
     const session = await this.ensureSession();
-
-    // Rate limiting
-    const now = Date.now();
-    const elapsed = now - this.lastRequestTime;
-    if (elapsed < this.options.apiRateLimitMs) {
-      await randomDelay(
-        this.options.apiRateLimitMs - elapsed,
-        this.options.apiRateLimitMs - elapsed + 100
-      );
-    }
-    this.lastRequestTime = Date.now();
 
     // Build cookie string
     const cookieStr = [
@@ -1112,7 +1096,6 @@ export class IMPIConcurrentPool {
   constructor(options: ConcurrentPoolOptions = {}) {
     this.options = {
       headless: true,
-      rateLimitMs: 2000,
       maxConcurrency: 1,
       maxRetries: 3,
       humanBehavior: true,
@@ -1122,7 +1105,6 @@ export class IMPIConcurrentPool {
       browserTimeoutMs: 300000,
       debug: false,
       screenshotDir: './screenshots',
-      apiRateLimitMs: 500,
       keepBrowserOpen: false,
       tokenRefreshIntervalMs: 25 * 60 * 1000,
       concurrency: 1,
@@ -1649,8 +1631,6 @@ export async function generateSearch(
 // ============================================================================
 
 export interface IMPIHttpClientOptions {
-  /** Rate limit between API requests in ms (default: 500ms) */
-  apiRateLimitMs?: number;
   /** Detail level for fetching trademark data (default: 'basic') */
   detailLevel?: 'basic' | 'full';
 }
@@ -1681,12 +1661,10 @@ export interface IMPIHttpClientOptions {
 export class IMPIHttpClient {
   private tokens: SessionTokens;
   private options: Required<IMPIHttpClientOptions>;
-  private lastRequestTime = 0;
 
   constructor(tokens: SessionTokens, options: IMPIHttpClientOptions = {}) {
     this.tokens = tokens;
     this.options = {
-      apiRateLimitMs: 500,
       detailLevel: 'basic',
       ...options,
     };
@@ -1724,17 +1702,6 @@ export class IMPIHttpClient {
     if (this.isTokenExpired()) {
       throw createError('SESSION_EXPIRED', 'Session tokens have expired. Generate new tokens.', { url });
     }
-
-    // Rate limiting
-    const now = Date.now();
-    const elapsed = now - this.lastRequestTime;
-    if (elapsed < this.options.apiRateLimitMs) {
-      await randomDelay(
-        this.options.apiRateLimitMs - elapsed,
-        this.options.apiRateLimitMs - elapsed + 100
-      );
-    }
-    this.lastRequestTime = Date.now();
 
     // Build cookie string
     const cookieStr = [

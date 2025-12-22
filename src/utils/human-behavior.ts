@@ -71,30 +71,3 @@ export async function humanScroll(page: Page, direction: 'up' | 'down' = 'down',
 
   await randomDelay(500, 1000);
 }
-
-/**
- * Rate limiter class
- */
-export class RateLimiter {
-  private minDelay: number;
-  private maxDelay: number;
-  private lastRequestTime: number = 0;
-
-  constructor(minDelayMs = 1000, maxDelayMs = 3000) {
-    this.minDelay = minDelayMs;
-    this.maxDelay = maxDelayMs;
-  }
-
-  async waitIfNeeded(): Promise<void> {
-    const now = Date.now();
-    const timeSinceLastRequest = now - this.lastRequestTime;
-    const requiredDelay = Math.floor(Math.random() * (this.maxDelay - this.minDelay + 1)) + this.minDelay;
-
-    if (timeSinceLastRequest < requiredDelay) {
-      const waitTime = requiredDelay - timeSinceLastRequest;
-      await new Promise(resolve => setTimeout(resolve, waitTime));
-    }
-
-    this.lastRequestTime = Date.now();
-  }
-}
