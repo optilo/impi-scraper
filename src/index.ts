@@ -34,30 +34,23 @@
 
 // Main API (uses Camoufox for session + direct API calls)
 export { IMPIApiClient, IMPIConcurrentPool, searchTrademarks } from './api';
-export type { IMPIApiClientOptions, ConcurrentPoolOptions, ConcurrentSearchResult } from './api';
+export { IMPIApiClientOptions, ConcurrentPoolOptions, ConcurrentSearchResult } from './api';
 
 // Proxy utilities
 export { parseProxyUrl, parseProxyFromEnv, resolveProxyConfig, testProxy, isProxyError, getProxyErrorMessage } from './utils/proxy';
 export { fetchProxies, fetchProxiesFromEnv, fetchIPFoxyProxies, parseProxyProviderFromEnv } from './utils/proxy-provider';
-export type { ProxyProviderConfig, ProxyProviderResult } from './utils/proxy-provider';
+export { ProxyProviderConfig, ProxyProviderResult } from './utils/proxy-provider';
 
-// Error handling
-export { IMPIError } from './types';
-export type {
-  // Configuration
+// Error handling and types
+export {
+  IMPIError,
   IMPIScraperOptions,
   ProxyConfig,
-
-  // Errors
   IMPIErrorCode,
   IMPIErrorDetails,
-
-  // Results
   SearchMetadata,
   SearchResults,
   TrademarkResult,
-
-  // Trademark details
   TrademarkOwner,
   TrademarkClass,
   TrademarkPriority,
