@@ -14,11 +14,11 @@
 
 import { Camoufox } from 'camoufox-js';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
-import { log } from './utils/logger';
-import { addHumanBehavior, randomDelay } from './utils/human-behavior';
-import { resolveProxyConfig, formatProxyForCamoufox } from './utils/proxy';
-import { fetchProxiesFromEnv } from './utils/proxy-provider';
-import { parseDate } from './utils/data';
+import { log } from './utils/logger.ts';
+import { addHumanBehavior, randomDelay } from './utils/human-behavior.ts';
+import { resolveProxyConfig, formatProxyForCamoufox } from './utils/proxy.ts';
+import { fetchProxiesFromEnv } from './utils/proxy-provider.ts';
+import { parseDate } from './utils/data.ts';
 import {
   IMPIError,
   type IMPIScraperOptions,
@@ -31,7 +31,7 @@ import {
   type SessionTokens,
   type GeneratedSearchResult,
   type GeneratedSearch,
-} from './types';
+} from './types.ts';
 
 /**
  * Quick search function for IMPI trademarks
@@ -49,6 +49,19 @@ export async function searchTrademarks(query: string, options: IMPIScraperOption
   }
 }
 
+/**
+ * Get only the total count of results for a keyword (no records fetched)
+ * Uses IMPIApiClient under the hood; still requires a valid session token
+ */
+export async function countTrademarks(query: string, options: IMPIScraperOptions = {}): Promise<number> {
+  const client = new IMPIApiClient(options);
+  try {
+    return await client.getCount(query);
+  } finally {
+    await client.close();
+  }
+}
+
 // ============================================================================
 // API-Only Mode Implementation
 // ============================================================================
@@ -57,6 +70,7 @@ const IMPI_CONFIG = {
   baseUrl: 'https://marcia.impi.gob.mx',
   searchUrl: 'https://marcia.impi.gob.mx/marcas/search/quick',
   searchApiUrl: 'https://marcia.impi.gob.mx/marcas/search/internal/result',
+  searchCountApiUrl: 'https://marcia.impi.gob.mx/marcas/search/internal/result/count',
   quickSearchApiUrl: 'https://marcia.impi.gob.mx/marcas/search/internal/record',
   detailsApiUrl: 'https://marcia.impi.gob.mx/marcas/search/internal/view',
   userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -464,6 +478,40 @@ export class IMPIApiClient {
     }
 
     return response;
+  }
+
+  /**
+   * Return only the total result count for a query (no records fetched)
+   */
+  async getCount(query: string): Promise<number> {
+    log.info(`Counting results for: "${query}"`);
+
+    const response = await this.apiFetch(IMPI_CONFIG.searchCountApiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json;charset=UTF-8',
+      },
+      body: JSON.stringify({
+        _type: 'Search$Quick',
+        query,
+        images: [],
+      }),
+    });
+
+    if (!response.ok) {
+      throw createError(
+        response.status === 429 ? 'RATE_LIMITED' : 'SERVER_ERROR',
+        `Search count API error: HTTP ${response.status}`,
+        { httpStatus: response.status, url: IMPI_CONFIG.searchCountApiUrl }
+      );
+    }
+
+    const data = await response.json();
+    if (typeof data.count === 'number') return data.count;
+    if (typeof data.totalResults === 'number') return data.totalResults;
+    throw createError('PARSE_ERROR', 'Search count response missing count field', {
+      url: IMPI_CONFIG.searchCountApiUrl,
+    });
   }
 
   /**

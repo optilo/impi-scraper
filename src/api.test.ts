@@ -10,11 +10,11 @@
  */
 
 import { describe, test, expect } from 'vitest';
-import { IMPIApiClient, IMPIConcurrentPool, searchTrademarks } from './api';
-import { IMPIError } from './types';
-import { parseDate } from './utils/data';
-import { formatProxyForCamoufox } from './utils/proxy';
-import type { SearchResults } from './types';
+import { IMPIApiClient, IMPIConcurrentPool, searchTrademarks } from './api.ts';
+import { IMPIError } from './types.ts';
+import { parseDate } from './utils/data.ts';
+import { formatProxyForCamoufox } from './utils/proxy.ts';
+import type { SearchResults } from './types.ts';
 
 // Mock data for tests - dates are in DD/MM/YYYY format as returned by IMPI API
 const mockSearchResponse = {

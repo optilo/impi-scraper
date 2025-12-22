@@ -3,7 +3,7 @@
  */
 
 import { describe, test, expect } from 'vitest';
-import { parseDate, sanitizeFilename, sleep } from './data';
+import { parseDate, sanitizeFilename, sleep } from './data.ts';
 
 describe('parseDate', () => {
   test('parses DD/MM/YYYY format correctly', () => {

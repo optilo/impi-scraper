@@ -25,10 +25,10 @@
 import 'dotenv/config';
 
 import { parseArgs } from 'util';
-import { IMPIApiClient, IMPIConcurrentPool, generateSessionTokens, generateSearch } from './src/index';
-import { parseProxyUrl } from './src/utils/proxy';
-import { fetchProxiesFromEnv, fetchProxies, parseProxyProviderFromEnv } from './src/utils/proxy-provider';
-import type { SearchResults, ProxyConfig } from './src/types';
+import { IMPIApiClient, IMPIConcurrentPool, generateSessionTokens, generateSearch, countTrademarks } from './src/index.ts';
+import { parseProxyUrl } from './src/utils/proxy.ts';
+import { fetchProxiesFromEnv, fetchProxies, parseProxyProviderFromEnv } from './src/utils/proxy-provider.ts';
+import type { SearchResults, ProxyConfig } from './src/types.ts';
 
 const HELP = `
 IMPI Trademark Scraper CLI
@@ -38,6 +38,7 @@ USAGE:
   tsx cli.ts search-many <keyword1> <keyword2> ... [options]
   tsx cli.ts generate-search <keyword>     # For serverless/queue workflows
   tsx cli.ts generate-tokens               # Generate session tokens only
+  tsx cli.ts count <keyword>               # Fast count only (no records fetched)
   tsx cli.ts fetch-proxies [count]
 
 COMMANDS:
@@ -45,6 +46,7 @@ COMMANDS:
   search-many <keywords>   Search multiple keywords concurrently (with proxies)
   generate-search <query>  Generate tokens + searchId for serverless (outputs JSON)
   generate-tokens          Generate session tokens only (outputs JSON)
+  count <keyword>          Return only the total result count for a keyword
   fetch-proxies            Fetch fresh proxy IPs from configured provider (IPFoxy)
 
 OPTIONS:
@@ -118,6 +120,51 @@ interface CLIOptions {
   debug: boolean;
   rateLimit: number;
   help: boolean;
+}
+
+async function runCount(keyword: string, options: CLIOptions): Promise<void> {
+  console.error(`Counting IMPI results for "${keyword}"...`);
+
+  // Resolve proxy (reuse same logic as search)
+  let proxy: ProxyConfig | undefined;
+  if (options.proxy) {
+    proxy = parseProxyUrl(options.proxy);
+    console.error(`Proxy: ${proxy.server}`);
+  } else if (options.autoProxy) {
+    const providerConfig = parseProxyProviderFromEnv();
+    if (!providerConfig) {
+      console.error('Error: --proxy requires IPFOXY_API_TOKEN to be set for auto-fetch');
+      process.exit(1);
+    }
+    console.error(`Fetching proxy from ${providerConfig.provider}...`);
+    try {
+      const result = await fetchProxies(providerConfig, 1);
+      if (result.proxies.length === 0) {
+        throw new Error('No proxies returned');
+      }
+      proxy = result.proxies[0];
+      console.error(`Proxy: ${proxy!.server} (auto-fetched)`);
+    } catch (err) {
+      console.error(`Error fetching proxy: ${(err as Error).message}`);
+      process.exit(1);
+    }
+  }
+
+  try {
+    const count = await countTrademarks(keyword, {
+      headless: true,
+      humanBehavior: options.human,
+      proxy,
+      apiRateLimitMs: options.rateLimit,
+      debug: options.debug,
+    });
+
+    console.log(JSON.stringify({ query: keyword, count }, null, 2));
+    console.error(`Done! Count: ${count}`);
+  } catch (error) {
+    console.error(`Error: ${(error as Error).message}`);
+    process.exit(1);
+  }
 }
 
 function parseCliArgs(): { command: string; keywords: string[]; options: CLIOptions } {
@@ -616,6 +663,17 @@ async function main(): Promise<void> {
 
   if (command === 'generate-tokens') {
     await runGenerateTokens(options);
+    return;
+  }
+
+  if (command === 'count') {
+    const keyword = keywords.join(' ');
+    if (!keyword) {
+      console.error('Error: keyword is required');
+      console.error('Usage: tsx cli.ts count <keyword>');
+      process.exit(1);
+    }
+    await runCount(keyword, options);
     return;
   }
 

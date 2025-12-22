@@ -3,7 +3,7 @@
  */
 
 import { describe, test, expect } from 'vitest';
-import { randomDelay, RateLimiter } from './human-behavior';
+import { randomDelay, RateLimiter } from './human-behavior.ts';
 
 describe('randomDelay', () => {
   test('delays within specified range', async () => {

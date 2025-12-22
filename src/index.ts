@@ -33,8 +33,8 @@
  */
 
 // Main API (uses Camoufox for session + direct API calls)
-export { IMPIApiClient, IMPIConcurrentPool, searchTrademarks } from './api';
-export { IMPIApiClientOptions, ConcurrentPoolOptions, ConcurrentSearchResult } from './api';
+export { IMPIApiClient, IMPIConcurrentPool, searchTrademarks, countTrademarks } from './api.ts';
+export type { IMPIApiClientOptions, ConcurrentPoolOptions, ConcurrentSearchResult } from './api.ts';
 
 // Serverless/Queue Architecture Support
 // These functions separate browser-dependent (token generation) from API-only operations
@@ -43,21 +43,24 @@ export {
   generateSessionTokens,
   generateSearchId,
   generateSearch,
-  GenerateTokensOptions,
-  GenerateSearchIdOptions,
   // Pure HTTP client (no browser required - for serverless)
   IMPIHttpClient,
+} from './api.ts';
+
+export type {
+  GenerateTokensOptions,
+  GenerateSearchIdOptions,
   IMPIHttpClientOptions,
-} from './api';
+} from './api.ts';
 
 // Proxy utilities
-export { parseProxyUrl, parseProxyFromEnv, resolveProxyConfig, testProxy, isProxyError, getProxyErrorMessage } from './utils/proxy';
-export { fetchProxies, fetchProxiesFromEnv, fetchIPFoxyProxies, parseProxyProviderFromEnv } from './utils/proxy-provider';
-export { ProxyProviderConfig, ProxyProviderResult } from './utils/proxy-provider';
+export { parseProxyUrl, parseProxyFromEnv, resolveProxyConfig, testProxy, isProxyError, getProxyErrorMessage } from './utils/proxy.ts';
+export { fetchProxies, fetchProxiesFromEnv, fetchIPFoxyProxies, parseProxyProviderFromEnv } from './utils/proxy-provider.ts';
+export type { ProxyProviderConfig, ProxyProviderResult } from './utils/proxy-provider.ts';
 
 // Error handling and types
-export {
-  IMPIError,
+export { IMPIError } from './types.ts';
+export type {
   IMPIScraperOptions,
   ProxyConfig,
   IMPIErrorCode,
@@ -74,4 +77,4 @@ export {
   SessionTokens,
   GeneratedSearchResult,
   GeneratedSearch,
-} from './types';
+} from './types.ts';

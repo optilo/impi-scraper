@@ -15,6 +15,10 @@ A TypeScript scraper for IMPI (Instituto Mexicano de la Propiedad Industrial) - 
 - **CLI Interface**: Easy command-line access with multiple output formats
 - **TypeScript**: Fully typed with comprehensive type definitions
 
+## Requirements
+
+- Node.js 22.x
+
 ## Installation
 
 ```bash
@@ -30,7 +34,7 @@ pnpm exec camoufox-js fetch
 The easiest way to use the scraper:
 
 ```bash
-# Basic keyword search
+# Basic keyword search (runs tsx once, no watcher)
 pnpm run search vitrum
 
 # Search with full details (owners, classes, history)
@@ -59,6 +63,12 @@ tsx cli.ts search vitrum --proxy http://user:pass@proxy.example.com:8080
 
 # Using environment variable for proxy
 IMPI_PROXY_URL=http://proxy:8080 tsx cli.ts search vitrum
+
+# Count only (no records fetched)
+pnpm run count pacific
+
+# Node-only fallback (no tsx)
+pnpm run count:node pacific
 ```
 
 ### CLI Commands

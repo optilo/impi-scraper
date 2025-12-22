@@ -3,7 +3,7 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach } from 'vitest';
-import { parseProxyUrl, parseProxyFromEnv, resolveProxyConfig, formatProxyForCamoufox } from './proxy';
+import { parseProxyUrl, parseProxyFromEnv, resolveProxyConfig, formatProxyForCamoufox } from './proxy.ts';
 import type { ProxyConfig } from '../types';
 
 describe('parseProxyUrl', () => {

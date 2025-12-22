@@ -23,7 +23,10 @@
     "README.md"
   ],
   "scripts": {
-    "search": "tsx cli.ts search",
+    "search": "tsx --no-reload cli.ts search",
+    "search:node": "node --experimental-strip-types --experimental-specifier-resolution=node cli.ts search",
+    "count": "tsx --no-reload cli.ts count",
+    "count:node": "node --experimental-strip-types --experimental-specifier-resolution=node cli.ts count",
     "test": "vitest run src/",
     "test:watch": "vitest watch src/",
     "test:integration": "vitest run tests/ --testTimeout=180000",
@@ -55,7 +58,7 @@
     "url": "https://github.com/optilo/impi-scraper"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22 <23"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
