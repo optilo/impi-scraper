@@ -69,6 +69,10 @@ pnpm run count pacific
 
 # Node-only fallback (no tsx)
 pnpm run count:node pacific
+
+# Quick count endpoint
+# Uses https://marcia.impi.gob.mx/marcas/search/internal/result/count
+# Requires a valid session (handled automatically)
 ```
 
 ### CLI Commands

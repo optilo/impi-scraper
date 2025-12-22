@@ -1,23 +1,43 @@
-import { describe, expect, test, vi } from 'vitest';
-import { countTrademarks, IMPIApiClient } from './api.ts';
+import { describe, expect, test } from 'vitest';
+import { execSync } from 'node:child_process';
+import { countTrademarks } from './api.ts';
 
-describe('countTrademarks', () => {
-  test('returns count and closes client', async () => {
-    const getCountSpy = vi
-      .spyOn(IMPIApiClient.prototype, 'getCount')
-      .mockResolvedValue(123);
-    const closeSpy = vi
-      .spyOn(IMPIApiClient.prototype, 'close')
-      .mockResolvedValue();
+async function ensureNativeModulesReady(): Promise<void> {
+  try {
+    await import('better-sqlite3');
+    return;
+  } catch (err: any) {
+    if (err?.code === 'ERR_DLOPEN_FAILED') {
+      try {
+        execSync('pnpm rebuild better-sqlite3', { stdio: 'inherit' });
+        await import('better-sqlite3');
+        return;
+      } catch {
+        throw new Error(
+          'better-sqlite3 native module mismatch. Run `pnpm rebuild better-sqlite3` with your current Node version.'
+        );
+      }
+    }
+    throw err;
+  }
+}
 
-    const result = await countTrademarks('foo');
+// Note: This test hits the real IMPI quick count endpoint.
+// Keep the query generic and assert on shape to reduce flakiness.
+describe('countTrademarks (live)', () => {
+  test(
+    'returns a positive count for a common keyword',
+    async () => {
+      await ensureNativeModulesReady();
 
-    expect(result).toBe(123);
-    expect(getCountSpy).toHaveBeenCalledWith('foo');
-    expect(closeSpy).toHaveBeenCalled();
+      const result = await countTrademarks('pacific', {
+        headless: true,
+        humanBehavior: false,
+      });
 
-    getCountSpy.mockRestore();
-    closeSpy.mockRestore();
-  });
+      expect(typeof result).toBe('number');
+      expect(result).toBeGreaterThan(0);
+    },
+    90_000
+  );
 });
-

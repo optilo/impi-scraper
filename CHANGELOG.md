@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.4.0] - 2025-12-22
+
+### Changed
+
+- Quick count now explicitly uses the `/marcas/search/internal/result/count` endpoint and shared parsing to accept either `count` or `totalResults` fields.
+- Live count test now hits the real IMPI API with a common keyword to verify end-to-end quick count.
+- Live count test auto-rebuilds `better-sqlite3` when native modules are out of sync with the current Node runtime.
+- Relaxed `randomDelay` timing test to allow scheduler drift while keeping bounds meaningful.
+
 ## [1.2.1] - 2025-12-12
 
 ### Added

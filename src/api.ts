@@ -76,6 +76,12 @@ const IMPI_CONFIG = {
   userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 };
 
+function parseCountResponse(data: unknown, url: string): number {
+  if (typeof (data as any)?.count === 'number') return (data as any).count;
+  if (typeof (data as any)?.totalResults === 'number') return (data as any).totalResults;
+  throw createError('PARSE_ERROR', 'Search count response missing count field', { url });
+}
+
 // SessionTokens is now imported from types.ts
 
 export interface IMPIApiClientOptions extends IMPIScraperOptions {
@@ -491,11 +497,7 @@ export class IMPIApiClient {
     }
 
     const data = await response.json();
-    if (typeof data.count === 'number') return data.count;
-    if (typeof data.totalResults === 'number') return data.totalResults;
-    throw createError('PARSE_ERROR', 'Search count response missing count field', {
-      url: IMPI_CONFIG.searchCountApiUrl,
-    });
+    return parseCountResponse(data, IMPI_CONFIG.searchCountApiUrl);
   }
 
   /**

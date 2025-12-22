@@ -10,9 +10,9 @@ describe('randomDelay', () => {
     const start = Date.now();
     await randomDelay(50, 100);
     const elapsed = Date.now() - start;
-    expect(elapsed).toBeGreaterThanOrEqual(45);
-    expect(elapsed).toBeLessThan(50);
+    expect(elapsed).toBeGreaterThanOrEqual(50);
+    // Allow small scheduling overhead/drift
+    expect(elapsed).toBeLessThanOrEqual(120);
   });
 });
-
 
