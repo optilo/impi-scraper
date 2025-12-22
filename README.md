@@ -673,6 +673,177 @@ This approach provides:
 - **Anti-Detection**: Only the initial page load uses a browser, reducing detection risk
 - **Low Resource Usage**: No browser running during the actual scraping
 
+## Serverless/Queue Architecture
+
+For environments that cannot run Playwright/Camoufox (Vercel, Cloudflare Workers, AWS Lambda, etc.), the scraper supports a split architecture:
+
+1. **Local/Docker**: Generate tokens + searchId (requires browser)
+2. **Serverless**: Fetch data using pure HTTP (no browser needed)
+
+### Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    LOCAL CLI (has Camoufox)                         │
+│  tsx cli.ts generate-search "nike" -o search.json                   │
+│                           │                                         │
+│                           ▼                                         │
+│  { tokens, searchId, totalResults, query, generatedAt }            │
+└─────────────────────────────────────────────────────────────────────┘
+                            │
+                            │ Pass to queue (Trigger.dev, etc.)
+                            ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                 SERVERLESS (pure HTTP, no browser)                  │
+│                                                                     │
+│  const client = new IMPIHttpClient(payload.tokens);                │
+│  const results = await client.fetchAllResults(                      │
+│    payload.searchId,                                                │
+│    payload.totalResults                                             │
+│  );                                                                 │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### CLI Commands
+
+```bash
+# Generate tokens + searchId for a query (outputs JSON)
+tsx cli.ts generate-search nike -o nike-search.json
+
+# Generate session tokens only (reusable for multiple searches)
+tsx cli.ts generate-tokens -o tokens.json
+
+# With proxy
+tsx cli.ts generate-search nike --proxy http://user:pass@proxy:8080
+```
+
+### Programmatic Usage
+
+#### Step 1: Generate Search Data (Local/Docker)
+
+```typescript
+import { generateSearch } from '@optilo/impi-scraper';
+
+// This requires Camoufox - run locally or in Docker
+const search = await generateSearch('nike', {
+  headless: true,
+  proxy: { server: 'http://proxy:8080' }  // Optional
+});
+
+console.log(search);
+// {
+//   tokens: { xsrfToken, jsessionId, sessionToken, obtainedAt, expiresAt },
+//   searchId: "abc-123-def",
+//   totalResults: 150,
+//   query: "nike",
+//   generatedAt: "2024-01-15T10:30:00.000Z"
+// }
+
+// Send to your queue system
+await myQueue.trigger(search);
+```
+
+#### Step 2: Process in Serverless (No Browser)
+
+```typescript
+import { IMPIHttpClient, type GeneratedSearch } from '@optilo/impi-scraper';
+
+// In your Trigger.dev/Vercel/Lambda handler
+export async function processSearch(payload: GeneratedSearch) {
+  // Pure HTTP client - NO Camoufox/Playwright needed
+  const client = new IMPIHttpClient(payload.tokens, {
+    apiRateLimitMs: 200,  // Faster rate limit in serverless
+    detailLevel: 'basic'
+  });
+
+  // Check token validity
+  if (client.isTokenExpired()) {
+    throw new Error('Tokens expired - regenerate locally');
+  }
+
+  // Fetch all results (paginated automatically)
+  const rawResults = await client.fetchAllResults(
+    payload.searchId,
+    payload.totalResults,
+    100  // Optional: limit to 100 results
+  );
+
+  // Or get full SearchResults format
+  const results = await client.processSearch(
+    payload.searchId,
+    payload.totalResults,
+    payload.query
+  );
+
+  return results;
+}
+```
+
+### IMPIHttpClient API
+
+```typescript
+class IMPIHttpClient {
+  constructor(tokens: SessionTokens, options?: IMPIHttpClientOptions);
+
+  // Token management
+  isTokenExpired(): boolean;
+  getTokenLifetimeMs(): number;
+
+  // Data fetching (pure HTTP)
+  fetchSearchResults(searchId: string, pageNumber?: number, pageSize?: number): Promise<IMPISearchResponse>;
+  fetchAllResults(searchId: string, totalResults: number, maxResults?: number): Promise<IMPITrademarkRaw[]>;
+  fetchTrademarkDetails(impiId: string, searchId?: string): Promise<IMPIDetailsResponse>;
+  fetchAllResultsWithDetails(searchId: string, totalResults: number, maxResults?: number): Promise<TrademarkResult[]>;
+  processSearch(searchId: string, totalResults: number, query: string, maxResults?: number): Promise<SearchResults>;
+}
+```
+
+### Token Lifecycle
+
+- Tokens are valid for ~25-30 minutes (JWT-based)
+- `generateSearch()` returns `expiresAt` timestamp
+- Use `client.isTokenExpired()` to check before processing
+- For long-running queues, regenerate tokens periodically
+
+### Example: Trigger.dev Integration
+
+```typescript
+// trigger/impi-search.ts
+import { task } from '@trigger.dev/sdk/v3';
+import { IMPIHttpClient, type GeneratedSearch } from '@optilo/impi-scraper';
+
+export const processIMPISearch = task({
+  id: 'process-impi-search',
+  run: async (payload: GeneratedSearch) => {
+    const client = new IMPIHttpClient(payload.tokens);
+
+    if (client.isTokenExpired()) {
+      throw new Error(`Tokens expired for query: ${payload.query}`);
+    }
+
+    const results = await client.processSearch(
+      payload.searchId,
+      payload.totalResults,
+      payload.query
+    );
+
+    return {
+      query: payload.query,
+      totalResults: results.metadata.totalResults,
+      processed: results.results.length,
+      results: results.results
+    };
+  }
+});
+
+// Local script to trigger
+import { generateSearch } from '@optilo/impi-scraper';
+import { processIMPISearch } from './trigger/impi-search';
+
+const search = await generateSearch('nike');
+await processIMPISearch.trigger(search);
+```
+
 ## Notes
 
 - The scraper respects rate limits to avoid overloading the IMPI server

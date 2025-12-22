@@ -220,6 +220,69 @@ export interface IMPITrademarkRaw {
   classes?: number[];
 }
 
+// ============================================================================
+// Session & Token Types (for serverless/queue architecture)
+// ============================================================================
+
+/**
+ * Session tokens extracted from IMPI website.
+ * These tokens are required for all API calls.
+ *
+ * @example Using pre-generated tokens
+ * ```typescript
+ * // On local machine (has Playwright/Camoufox)
+ * const tokens = await generateSessionTokens();
+ * const { searchId } = await generateSearchId('nike', tokens);
+ *
+ * // Send to serverless function
+ * await queue.trigger({ tokens, searchId, query: 'nike' });
+ *
+ * // In serverless function (no Playwright needed)
+ * const client = new IMPIHttpClient(tokens);
+ * const results = await client.fetchSearchResults(searchId);
+ * ```
+ */
+export interface SessionTokens {
+  /** XSRF token (URL-decoded) */
+  xsrfToken: string;
+  /** Java session ID */
+  jsessionId: string;
+  /** JWT session token */
+  sessionToken: string;
+  /** Timestamp when tokens were obtained (ms since epoch) */
+  obtainedAt: number;
+  /** JWT expiration time (ms since epoch), if available */
+  expiresAt?: number;
+}
+
+/**
+ * Result from generateSearchId - contains searchId for API calls
+ */
+export interface GeneratedSearchResult {
+  /** Search ID for fetching results (UUID format) */
+  searchId: string;
+  /** Total number of results found */
+  totalResults: number;
+  /** The query that was searched */
+  query: string;
+}
+
+/**
+ * Combined session + search data for passing to serverless functions
+ */
+export interface GeneratedSearch {
+  /** Session tokens for API authentication */
+  tokens: SessionTokens;
+  /** Search ID for fetching results */
+  searchId: string;
+  /** Total number of results found */
+  totalResults: number;
+  /** The query that was searched */
+  query: string;
+  /** Timestamp when this was generated */
+  generatedAt: string;
+}
+
 export interface IMPIDetailsResponse {
   details?: {
     generalInformation?: {

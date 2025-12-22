@@ -28,6 +28,9 @@ import {
   type IMPISearchResponse,
   type IMPIDetailsResponse,
   type IMPITrademarkRaw,
+  type SessionTokens,
+  type GeneratedSearchResult,
+  type GeneratedSearch,
 } from './types';
 
 /**
@@ -59,13 +62,7 @@ const IMPI_CONFIG = {
   userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 };
 
-interface SessionTokens {
-  xsrfToken: string;
-  jsessionId: string;
-  sessionToken: string;
-  obtainedAt: number;
-  expiresAt?: number; // JWT exp claim
-}
+// SessionTokens is now imported from types.ts
 
 export interface IMPIApiClientOptions extends IMPIScraperOptions {
   /** Rate limit between API requests in ms (default: 500ms) */
@@ -1284,5 +1281,757 @@ export class IMPIConcurrentPool {
     this.initialized = false;
 
     log.info('All workers closed');
+  }
+}
+
+// ============================================================================
+// Serverless/Queue Architecture Support
+// ============================================================================
+// These functions separate browser-dependent operations (token/searchId generation)
+// from API-only operations (fetching results/details), enabling use in environments
+// that cannot run Playwright/Camoufox (e.g., Vercel, Cloudflare Workers, Lambda).
+
+export interface GenerateTokensOptions {
+  /** Show browser window (default: false) */
+  headless?: boolean;
+  /** Proxy configuration */
+  proxy?: ProxyConfig;
+  /** Enable human-like behavior (default: true) */
+  humanBehavior?: boolean;
+}
+
+/**
+ * Generate session tokens using a browser.
+ *
+ * This function REQUIRES Camoufox/Playwright and should be run on a machine
+ * that supports browser automation (e.g., local CLI, Docker container).
+ *
+ * @example
+ * ```typescript
+ * // On local machine
+ * const tokens = await generateSessionTokens();
+ * console.log(`Tokens valid until: ${new Date(tokens.expiresAt!)}`);
+ *
+ * // Pass tokens to serverless function
+ * await myQueue.trigger({ tokens, query: 'nike' });
+ * ```
+ */
+export async function generateSessionTokens(options: GenerateTokensOptions = {}): Promise<SessionTokens> {
+  const {
+    headless = true,
+    proxy,
+    humanBehavior = true,
+  } = options;
+
+  log.info('Generating session tokens via Camoufox...');
+
+  const formattedProxy = formatProxyForCamoufox(proxy);
+  if (proxy) {
+    log.info(`Using proxy: ${proxy.server}`);
+  }
+
+  const browser = await Camoufox({
+    headless,
+    geoip: true,
+    proxy: formattedProxy,
+    args: [
+      '--disable-blink-features=AutomationControlled',
+      '--disable-dev-shm-usage',
+    ],
+  });
+
+  if (!browser) {
+    throw new Error('Failed to create Camoufox browser');
+  }
+
+  try {
+    const context = await browser.newContext({
+      userAgent: IMPI_CONFIG.userAgent,
+    });
+    const page = await context.newPage();
+
+    if (humanBehavior) {
+      await addHumanBehavior(page);
+    }
+
+    // Navigate to IMPI to get session cookies
+    await page.goto(IMPI_CONFIG.searchUrl, {
+      waitUntil: 'networkidle',
+      timeout: 60000,
+    });
+    await randomDelay(500, 1000);
+
+    // Extract cookies
+    const cookies = await context.cookies();
+    const xsrfCookie = cookies.find(c => c.name === 'XSRF-TOKEN');
+    const jsessionCookie = cookies.find(c => c.name === 'JSESSIONID');
+    const sessionCookie = cookies.find(c => c.name === 'SESSIONTOKEN');
+
+    if (!xsrfCookie || !jsessionCookie || !sessionCookie) {
+      const missing = [];
+      if (!xsrfCookie) missing.push('XSRF-TOKEN');
+      if (!jsessionCookie) missing.push('JSESSIONID');
+      if (!sessionCookie) missing.push('SESSIONTOKEN');
+
+      throw createError(
+        'SESSION_EXPIRED',
+        `Failed to obtain session tokens. Missing: ${missing.join(', ')}`,
+        { url: IMPI_CONFIG.searchUrl }
+      );
+    }
+
+    // Parse JWT expiration
+    let expiresAt: number | undefined;
+    try {
+      const jwtPayload = JSON.parse(atob(sessionCookie.value.split('.')[1]!));
+      if (jwtPayload.exp) {
+        expiresAt = jwtPayload.exp * 1000;
+      }
+    } catch {
+      // JWT parsing failed, use default expiration
+    }
+
+    const tokens: SessionTokens = {
+      xsrfToken: decodeURIComponent(xsrfCookie.value),
+      jsessionId: jsessionCookie.value,
+      sessionToken: sessionCookie.value,
+      obtainedAt: Date.now(),
+      expiresAt,
+    };
+
+    log.info('Session tokens generated successfully');
+    if (expiresAt) {
+      const expiresIn = Math.round((expiresAt - Date.now()) / 1000 / 60);
+      log.info(`Tokens expire in ~${expiresIn} minutes`);
+    }
+
+    return tokens;
+  } finally {
+    await browser.close();
+  }
+}
+
+export interface GenerateSearchIdOptions extends GenerateTokensOptions {
+  /** Pre-generated tokens (if not provided, will generate new ones) */
+  tokens?: SessionTokens;
+}
+
+/**
+ * Generate a searchId for a query using a browser.
+ *
+ * This function REQUIRES Camoufox/Playwright. The returned searchId can be
+ * used with IMPIHttpClient to fetch results without a browser.
+ *
+ * @example
+ * ```typescript
+ * // Generate searchId locally
+ * const tokens = await generateSessionTokens();
+ * const { searchId, totalResults } = await generateSearchId('nike', { tokens });
+ *
+ * // Pass to serverless function
+ * await myQueue.trigger({ tokens, searchId, totalResults });
+ * ```
+ */
+export async function generateSearchId(
+  query: string,
+  options: GenerateSearchIdOptions = {}
+): Promise<GeneratedSearchResult> {
+  const {
+    headless = true,
+    proxy,
+    humanBehavior = true,
+    tokens: providedTokens,
+  } = options;
+
+  log.info(`Generating searchId for query: "${query}"`);
+
+  // Generate tokens if not provided
+  const tokens = providedTokens || await generateSessionTokens({ headless, proxy, humanBehavior });
+
+  const formattedProxy = formatProxyForCamoufox(proxy);
+
+  const browser = await Camoufox({
+    headless,
+    geoip: true,
+    proxy: formattedProxy,
+  });
+
+  if (!browser) {
+    throw new Error('Failed to create Camoufox browser');
+  }
+
+  try {
+    const context = await browser.newContext({
+      userAgent: IMPI_CONFIG.userAgent,
+    });
+
+    // Inject session cookies
+    await context.addCookies([
+      { name: 'XSRF-TOKEN', value: encodeURIComponent(tokens.xsrfToken), domain: 'marcia.impi.gob.mx', path: '/' },
+      { name: 'JSESSIONID', value: tokens.jsessionId, domain: 'marcia.impi.gob.mx', path: '/' },
+      { name: 'SESSIONTOKEN', value: tokens.sessionToken, domain: 'marcia.impi.gob.mx', path: '/' },
+    ]);
+
+    const page = await context.newPage();
+
+    if (humanBehavior) {
+      await addHumanBehavior(page);
+    }
+
+    // Intercept API response
+    let searchResponse: IMPISearchResponse | null = null;
+    let resolveSearch: () => void;
+    const searchPromise = new Promise<void>((resolve) => {
+      resolveSearch = resolve;
+    });
+
+    page.on('response', async (response) => {
+      const url = response.url();
+      if (url.includes('/marcas/search/internal')) {
+        try {
+          const data = await response.json();
+          if (data.resultPage) {
+            searchResponse = data;
+            resolveSearch();
+          }
+        } catch {}
+      }
+    });
+
+    // Navigate and search
+    await page.goto(IMPI_CONFIG.searchUrl, {
+      waitUntil: 'networkidle',
+      timeout: 60000,
+    });
+    await randomDelay(300, 600);
+
+    const searchInput = await page.waitForSelector('input[name="quick"], input[type="text"]', {
+      timeout: 10000,
+    });
+
+    if (!searchInput) {
+      throw createError('PARSE_ERROR', 'Search input not found', { url: IMPI_CONFIG.searchUrl });
+    }
+
+    await searchInput.click();
+
+    if (humanBehavior) {
+      await searchInput.type(query, { delay: 30 });
+    } else {
+      await searchInput.fill(query);
+    }
+
+    await randomDelay(100, 300);
+    await searchInput.press('Enter');
+
+    // Wait for response
+    const timeoutPromise = new Promise<void>((_, reject) => {
+      setTimeout(() => reject(new Error('Search timeout')), 30000);
+    });
+
+    await Promise.race([searchPromise, timeoutPromise]).catch(() => {});
+    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+    await randomDelay(500, 1000);
+
+    // Extract searchId from URL
+    const currentUrl = page.url();
+    const searchIdMatch = currentUrl.match(/[?&]s=([a-f0-9-]+)/i);
+    const searchId = searchIdMatch ? searchIdMatch[1]! : '';
+
+    // Handle no results
+    if (!searchResponse) {
+      const bodyText = await page.textContent('body').catch(() => '') || '';
+      if (bodyText.toLowerCase().includes('no hay resultados') ||
+          bodyText.toLowerCase().includes('considera realizar una nueva búsqueda')) {
+        return { searchId: '', totalResults: 0, query };
+      }
+      throw createError('PARSE_ERROR', 'Failed to get search results', { url: currentUrl });
+    }
+
+    // TypeScript doesn't track closure mutations, so we need to help it
+    const response = searchResponse as IMPISearchResponse;
+    log.info(`SearchId generated: ${searchId} (${response.totalResults} results)`);
+
+    return {
+      searchId,
+      totalResults: response.totalResults || response.resultPage.length,
+      query,
+    };
+  } finally {
+    await browser.close();
+  }
+}
+
+/**
+ * Generate a complete search payload (tokens + searchId) for use in serverless functions.
+ *
+ * This is a convenience function that combines generateSessionTokens and generateSearchId.
+ *
+ * @example
+ * ```typescript
+ * // On local CLI
+ * const search = await generateSearch('nike');
+ *
+ * // Pass to Trigger.dev or other queue
+ * await myTask.trigger(search);
+ *
+ * // In the task handler (no Playwright needed)
+ * const client = new IMPIHttpClient(payload.tokens);
+ * const results = await client.fetchSearchResults(payload.searchId);
+ * ```
+ */
+export async function generateSearch(
+  query: string,
+  options: GenerateTokensOptions = {}
+): Promise<GeneratedSearch> {
+  const tokens = await generateSessionTokens(options);
+  const { searchId, totalResults } = await generateSearchId(query, { ...options, tokens });
+
+  return {
+    tokens,
+    searchId,
+    totalResults,
+    query,
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+// ============================================================================
+// IMPIHttpClient - Pure HTTP Client (No Browser Required)
+// ============================================================================
+
+export interface IMPIHttpClientOptions {
+  /** Rate limit between API requests in ms (default: 500ms) */
+  apiRateLimitMs?: number;
+  /** Detail level for fetching trademark data (default: 'basic') */
+  detailLevel?: 'basic' | 'full';
+}
+
+/**
+ * Pure HTTP client for IMPI API calls.
+ *
+ * This client does NOT require Playwright/Camoufox - it only makes HTTP requests.
+ * Use this in serverless environments (Vercel, Cloudflare Workers, Lambda, etc.)
+ * after generating tokens and searchId on a machine that supports browser automation.
+ *
+ * @example
+ * ```typescript
+ * // In your serverless function
+ * export async function handler(payload: GeneratedSearch) {
+ *   const client = new IMPIHttpClient(payload.tokens, { apiRateLimitMs: 200 });
+ *
+ *   // Fetch all results
+ *   const results = await client.fetchAllResults(payload.searchId, payload.totalResults);
+ *
+ *   // Or fetch with full details
+ *   const detailed = await client.fetchAllResultsWithDetails(payload.searchId, payload.totalResults);
+ *
+ *   return detailed;
+ * }
+ * ```
+ */
+export class IMPIHttpClient {
+  private tokens: SessionTokens;
+  private options: Required<IMPIHttpClientOptions>;
+  private lastRequestTime = 0;
+
+  constructor(tokens: SessionTokens, options: IMPIHttpClientOptions = {}) {
+    this.tokens = tokens;
+    this.options = {
+      apiRateLimitMs: 500,
+      detailLevel: 'basic',
+      ...options,
+    };
+  }
+
+  /**
+   * Check if the tokens are expired
+   */
+  isTokenExpired(): boolean {
+    if (this.tokens.expiresAt) {
+      const buffer = 5 * 60 * 1000; // 5 minute buffer
+      return Date.now() > this.tokens.expiresAt - buffer;
+    }
+    // Default: assume 25 min lifetime
+    const age = Date.now() - this.tokens.obtainedAt;
+    return age > 25 * 60 * 1000;
+  }
+
+  /**
+   * Get remaining token lifetime in milliseconds
+   */
+  getTokenLifetimeMs(): number {
+    if (this.tokens.expiresAt) {
+      return Math.max(0, this.tokens.expiresAt - Date.now());
+    }
+    // Default: assume 25 min from obtainedAt
+    const defaultExpiry = this.tokens.obtainedAt + 25 * 60 * 1000;
+    return Math.max(0, defaultExpiry - Date.now());
+  }
+
+  /**
+   * Rate-limited fetch with token headers
+   */
+  private async apiFetch(url: string, options: RequestInit = {}): Promise<Response> {
+    if (this.isTokenExpired()) {
+      throw createError('SESSION_EXPIRED', 'Session tokens have expired. Generate new tokens.', { url });
+    }
+
+    // Rate limiting
+    const now = Date.now();
+    const elapsed = now - this.lastRequestTime;
+    if (elapsed < this.options.apiRateLimitMs) {
+      await randomDelay(
+        this.options.apiRateLimitMs - elapsed,
+        this.options.apiRateLimitMs - elapsed + 100
+      );
+    }
+    this.lastRequestTime = Date.now();
+
+    // Build cookie string
+    const cookieStr = [
+      `XSRF-TOKEN=${encodeURIComponent(this.tokens.xsrfToken)}`,
+      `JSESSIONID=${this.tokens.jsessionId}`,
+      `SESSIONTOKEN=${this.tokens.sessionToken}`,
+    ].join('; ');
+
+    const headers: Record<string, string> = {
+      'Accept': 'application/json, text/plain, */*',
+      'Accept-Language': 'en-US,en;q=0.9,es;q=0.8',
+      'Cookie': cookieStr,
+      'Origin': IMPI_CONFIG.baseUrl,
+      'Referer': `${IMPI_CONFIG.baseUrl}/marcas/search/quick`,
+      'User-Agent': IMPI_CONFIG.userAgent,
+      'X-XSRF-TOKEN': this.tokens.xsrfToken,
+      'sec-ch-ua': '"Google Chrome";v="120", "Chromium";v="120", "Not A(Brand";v="24"',
+      'sec-ch-ua-mobile': '?0',
+      'sec-ch-ua-platform': '"macOS"',
+      'sec-fetch-dest': 'empty',
+      'sec-fetch-mode': 'cors',
+      'sec-fetch-site': 'same-origin',
+      ...(options.headers as Record<string, string> || {}),
+    };
+
+    const response = await fetch(url, {
+      ...options,
+      headers,
+    });
+
+    if (response.status === 401 || response.status === 403) {
+      throw createError('SESSION_EXPIRED', 'Session expired. Generate new tokens.', {
+        httpStatus: response.status,
+        url,
+      });
+    }
+
+    return response;
+  }
+
+  /**
+   * Fetch a single page of search results
+   */
+  async fetchSearchResults(searchId: string, pageNumber = 0, pageSize = 100): Promise<IMPISearchResponse> {
+    log.debug(`Fetching results page ${pageNumber} for search ${searchId}`);
+
+    const response = await this.apiFetch(IMPI_CONFIG.searchApiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json;charset=UTF-8',
+      },
+      body: JSON.stringify({
+        searchId,
+        pageSize,
+        pageNumber,
+        statusFilter: [],
+        viennaCodeFilter: [],
+        niceClassFilter: [],
+      }),
+    });
+
+    if (!response.ok) {
+      throw createError(
+        response.status === 429 ? 'RATE_LIMITED' : 'SERVER_ERROR',
+        `Search results API error: HTTP ${response.status}`,
+        { httpStatus: response.status, url: IMPI_CONFIG.searchApiUrl }
+      );
+    }
+
+    return response.json();
+  }
+
+  /**
+   * Fetch all search results (paginated)
+   */
+  async fetchAllResults(searchId: string, totalResults: number, maxResults = 0): Promise<IMPITrademarkRaw[]> {
+    const allResults: IMPITrademarkRaw[] = [];
+    const pageSize = 100;
+    const totalPages = Math.ceil(totalResults / pageSize);
+    const limit = maxResults > 0 ? maxResults : totalResults;
+
+    for (let page = 0; page < totalPages; page++) {
+      const pageResults = await this.fetchSearchResults(searchId, page, pageSize);
+      allResults.push(...pageResults.resultPage);
+
+      if (allResults.length >= limit) {
+        break;
+      }
+    }
+
+    return allResults.slice(0, limit);
+  }
+
+  /**
+   * Fetch trademark details
+   */
+  async fetchTrademarkDetails(impiId: string, searchId?: string): Promise<IMPIDetailsResponse> {
+    log.debug(`Fetching details for ${impiId}`);
+
+    const params = new URLSearchParams();
+    if (searchId) {
+      params.set('s', searchId);
+      params.set('m', 'l');
+    }
+    params.set('pageSize', '100');
+
+    const url = `${IMPI_CONFIG.detailsApiUrl}/${impiId}?${params.toString()}`;
+
+    const response = await this.apiFetch(url);
+
+    if (!response.ok) {
+      throw createError(
+        response.status === 429 ? 'RATE_LIMITED' :
+        response.status === 404 ? 'NOT_FOUND' : 'SERVER_ERROR',
+        `Details API error: HTTP ${response.status}`,
+        { httpStatus: response.status, url }
+      );
+    }
+
+    return response.json();
+  }
+
+  /**
+   * Fetch all results with full details
+   */
+  async fetchAllResultsWithDetails(
+    searchId: string,
+    totalResults: number,
+    maxResults = 0
+  ): Promise<TrademarkResult[]> {
+    const rawResults = await this.fetchAllResults(searchId, totalResults, maxResults);
+    const results: TrademarkResult[] = [];
+
+    for (const trademark of rawResults) {
+      try {
+        const details = await this.fetchTrademarkDetails(trademark.id, searchId);
+        results.push(this.extractTrademarkData(trademark, details, searchId));
+      } catch (err) {
+        log.warning(`Failed to get details for ${trademark.id}: ${(err as Error).message}`);
+        results.push(this.extractBasicData(trademark, searchId));
+      }
+    }
+
+    return results;
+  }
+
+  /**
+   * Process search results into SearchResults format
+   */
+  async processSearch(
+    searchId: string,
+    totalResults: number,
+    query: string,
+    maxResults = 0
+  ): Promise<SearchResults> {
+    const startTime = Date.now();
+
+    if (totalResults === 0 || !searchId) {
+      return {
+        metadata: {
+          query,
+          executedAt: new Date().toISOString(),
+          searchId: null,
+          searchUrl: null,
+          totalResults: 0,
+          externalIp: null,
+        },
+        results: [],
+        performance: {
+          durationMs: Date.now() - startTime,
+          avgPerResultMs: 0,
+        },
+      };
+    }
+
+    const rawResults = await this.fetchAllResults(searchId, totalResults, maxResults);
+    const results: TrademarkResult[] = [];
+
+    if (this.options.detailLevel === 'full') {
+      for (const trademark of rawResults) {
+        try {
+          const details = await this.fetchTrademarkDetails(trademark.id, searchId);
+          results.push(this.extractTrademarkData(trademark, details, searchId));
+        } catch (err) {
+          log.warning(`Failed to get details for ${trademark.id}: ${(err as Error).message}`);
+          results.push(this.extractBasicData(trademark, searchId));
+        }
+      }
+    } else {
+      for (const trademark of rawResults) {
+        results.push(this.extractBasicData(trademark, searchId));
+      }
+    }
+
+    const duration = Date.now() - startTime;
+
+    return {
+      metadata: {
+        query,
+        executedAt: new Date().toISOString(),
+        searchId,
+        searchUrl: `${IMPI_CONFIG.baseUrl}/marcas/search/result?s=${searchId}&m=l`,
+        totalResults,
+        externalIp: null,
+      },
+      results,
+      performance: {
+        durationMs: duration,
+        avgPerResultMs: results.length > 0 ? Math.round(duration / results.length) : 0,
+      },
+    };
+  }
+
+  /**
+   * Extract basic data from raw trademark
+   */
+  private extractBasicData(trademark: IMPITrademarkRaw, searchId: string): TrademarkResult {
+    const ownerName = trademark.owners?.[0] || null;
+    const classes = trademark.classes?.map(classNum => ({
+      classNumber: classNum,
+      goodsAndServices: '',
+    })) || [];
+
+    return {
+      searchId,
+      impiId: trademark.id,
+      detailsUrl: `${IMPI_CONFIG.baseUrl}/marcas/search/result?s=${searchId}&m=d&id=${trademark.id}`,
+      title: trademark.title,
+      status: trademark.status,
+      ownerName,
+      applicationNumber: trademark.applicationNumber,
+      registrationNumber: trademark.registrationNumber || null,
+      appType: trademark.appType,
+      applicationDate: parseDate(trademark.dates?.application),
+      registrationDate: parseDate(trademark.dates?.registration),
+      publicationDate: parseDate(trademark.dates?.publication),
+      expiryDate: parseDate(trademark.dates?.expiry),
+      cancellationDate: parseDate(trademark.dates?.cancellation),
+      goodsAndServices: trademark.goodsAndServices || '',
+      viennaCodes: null,
+      imageUrl: trademark.images || [],
+      owners: trademark.owners?.map(name => ({
+        name,
+        address: null,
+        city: null,
+        state: null,
+        country: null,
+      })) || [],
+      classes,
+      priorities: [],
+      history: [],
+    };
+  }
+
+  /**
+   * Extract full data from trademark with details
+   */
+  private extractTrademarkData(trademark: IMPITrademarkRaw, details: IMPIDetailsResponse, searchId: string): TrademarkResult {
+    const generalInfo = details?.details?.generalInformation;
+    const trademarkInfo = details?.details?.trademark;
+
+    const data: TrademarkResult = {
+      searchId,
+      impiId: trademark.id,
+      detailsUrl: `${IMPI_CONFIG.baseUrl}/marcas/search/result?s=${searchId}&m=d&id=${trademark.id}`,
+      title: trademark.title,
+      status: details?.result?.status || trademark.status,
+      applicationNumber: trademark.applicationNumber,
+      registrationNumber: trademark.registrationNumber || null,
+      appType: trademark.appType,
+      applicationDate: parseDate(generalInfo?.applicationDate || trademark.dates?.application),
+      registrationDate: parseDate(generalInfo?.registrationDate || trademark.dates?.registration),
+      publicationDate: parseDate(trademark.dates?.publication),
+      expiryDate: parseDate(generalInfo?.expiryDate || trademark.dates?.expiry),
+      cancellationDate: parseDate(trademark.dates?.cancellation),
+      goodsAndServices: trademark.goodsAndServices || '',
+      viennaCodes: trademarkInfo?.viennaCodes || null,
+      imageUrl: trademarkInfo?.image || trademark.images || [],
+      ownerName: null,
+      owners: [],
+      classes: [],
+      priorities: [],
+      history: [],
+      totalResults: details?.totalResults,
+      currentOrdinal: details?.currentOrdinal,
+    };
+
+    // Extract owners
+    const ownerInfo = details?.details?.ownerInformation?.owners;
+    if (ownerInfo && Array.isArray(ownerInfo)) {
+      data.owners = ownerInfo.map(owner => ({
+        name: owner.Name?.[0] || '',
+        address: owner.Addr?.[0] || null,
+        city: owner.City?.[0] || null,
+        state: owner.State?.[0] || null,
+        country: owner.Cry?.[0] || null,
+      }));
+      if (data.owners.length > 0) {
+        data.ownerName = data.owners[0]!.name;
+      }
+    }
+
+    // Extract classes
+    const productsAndServices = details?.details?.productsAndServices;
+    if (productsAndServices && Array.isArray(productsAndServices)) {
+      data.classes = productsAndServices.map(item => ({
+        classNumber: item.classes,
+        goodsAndServices: item.goodsAndServices,
+      }));
+      if (!data.goodsAndServices && data.classes.length > 0) {
+        data.goodsAndServices = data.classes.map(c => c.goodsAndServices).join(' | ');
+      }
+    }
+
+    // Extract priorities
+    const prioridad = details?.details?.prioridad;
+    if (prioridad && Array.isArray(prioridad)) {
+      data.priorities = prioridad.map(p => ({
+        country: p.country || '',
+        applicationNumber: p.applicationNumber || '',
+        applicationDate: parseDate(p.applicationDate),
+      }));
+    }
+
+    // Extract history
+    const historyRecords = details?.historyData?.historyRecords;
+    if (historyRecords && Array.isArray(historyRecords)) {
+      data.history = historyRecords.map(hist => ({
+        procedureEntreeSheet: hist.procedureEntreeSheet,
+        description: hist.description,
+        receptionYear: hist.receptionYear ? parseInt(hist.receptionYear) : null,
+        startDate: parseDate(hist.startDate),
+        dateOfConclusion: parseDate(hist.dateOfConclusion),
+        pdfUrl: hist.image,
+        email: hist.email || null,
+        oficios: (hist.details?.oficios || []).map(oficio => ({
+          description: oficio.descriptionOfTheTrade,
+          officeNumber: oficio.officeNumber,
+          date: parseDate(oficio.dateOfTheTrade),
+          notificationStatus: oficio.notificationStatus,
+          pdfUrl: oficio.image,
+        })),
+      }));
+    }
+
+    return data;
   }
 }

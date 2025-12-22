@@ -36,6 +36,20 @@
 export { IMPIApiClient, IMPIConcurrentPool, searchTrademarks } from './api';
 export { IMPIApiClientOptions, ConcurrentPoolOptions, ConcurrentSearchResult } from './api';
 
+// Serverless/Queue Architecture Support
+// These functions separate browser-dependent (token generation) from API-only operations
+export {
+  // Token & SearchId generation (requires Camoufox/Playwright)
+  generateSessionTokens,
+  generateSearchId,
+  generateSearch,
+  GenerateTokensOptions,
+  GenerateSearchIdOptions,
+  // Pure HTTP client (no browser required - for serverless)
+  IMPIHttpClient,
+  IMPIHttpClientOptions,
+} from './api';
+
 // Proxy utilities
 export { parseProxyUrl, parseProxyFromEnv, resolveProxyConfig, testProxy, isProxyError, getProxyErrorMessage } from './utils/proxy';
 export { fetchProxies, fetchProxiesFromEnv, fetchIPFoxyProxies, parseProxyProviderFromEnv } from './utils/proxy-provider';
@@ -55,5 +69,9 @@ export {
   TrademarkClass,
   TrademarkPriority,
   TrademarkHistory,
-  TrademarkOficio
+  TrademarkOficio,
+  // Serverless/Queue types
+  SessionTokens,
+  GeneratedSearchResult,
+  GeneratedSearch,
 } from './types';

@@ -25,7 +25,7 @@
 import 'dotenv/config';
 
 import { parseArgs } from 'util';
-import { IMPIApiClient, IMPIConcurrentPool } from './src/index';
+import { IMPIApiClient, IMPIConcurrentPool, generateSessionTokens, generateSearch } from './src/index';
 import { parseProxyUrl } from './src/utils/proxy';
 import { fetchProxiesFromEnv, fetchProxies, parseProxyProviderFromEnv } from './src/utils/proxy-provider';
 import type { SearchResults, ProxyConfig } from './src/types';
@@ -36,11 +36,15 @@ IMPI Trademark Scraper CLI
 USAGE:
   pnpm run search <keyword> [options]
   tsx cli.ts search-many <keyword1> <keyword2> ... [options]
+  tsx cli.ts generate-search <keyword>     # For serverless/queue workflows
+  tsx cli.ts generate-tokens               # Generate session tokens only
   tsx cli.ts fetch-proxies [count]
 
 COMMANDS:
   search <keyword>         Search trademarks by keyword
   search-many <keywords>   Search multiple keywords concurrently (with proxies)
+  generate-search <query>  Generate tokens + searchId for serverless (outputs JSON)
+  generate-tokens          Generate session tokens only (outputs JSON)
   fetch-proxies            Fetch fresh proxy IPs from configured provider (IPFoxy)
 
 OPTIONS:
@@ -87,6 +91,17 @@ EXAMPLES:
 
   # Debug mode (saves screenshots on CAPTCHA/blocking)
   tsx cli.ts search vitrum --debug --visible
+
+SERVERLESS/QUEUE WORKFLOW:
+  # Generate tokens + searchId locally, then process in serverless
+  tsx cli.ts generate-search nike -o nike-search.json
+
+  # Generate tokens only (reuse for multiple searches)
+  tsx cli.ts generate-tokens -o tokens.json
+
+  # In your Trigger.dev/Vercel function:
+  # const client = new IMPIHttpClient(payload.tokens);
+  # const results = await client.fetchAllResults(payload.searchId, payload.totalResults);
 `;
 
 interface CLIOptions {
@@ -464,6 +479,127 @@ async function runConcurrentSearch(keywords: string[], options: CLIOptions): Pro
   }
 }
 
+async function runGenerateTokens(options: CLIOptions): Promise<void> {
+  console.error('Generating session tokens...');
+  console.error(`Visible browser: ${options.visible}`);
+  console.error('');
+
+  // Resolve proxy if specified
+  let proxy: ProxyConfig | undefined;
+  if (options.proxy) {
+    proxy = parseProxyUrl(options.proxy);
+    console.error(`Proxy: ${proxy.server}`);
+  } else if (options.autoProxy) {
+    const providerConfig = parseProxyProviderFromEnv();
+    if (!providerConfig) {
+      console.error('Error: --proxy requires IPFOXY_API_TOKEN to be set for auto-fetch');
+      process.exit(1);
+    }
+    console.error(`Fetching proxy from ${providerConfig.provider}...`);
+    try {
+      const result = await fetchProxies(providerConfig, 1);
+      if (result.proxies.length === 0) {
+        throw new Error('No proxies returned');
+      }
+      proxy = result.proxies[0];
+      console.error(`Proxy: ${proxy!.server} (auto-fetched)`);
+    } catch (err) {
+      console.error(`Error fetching proxy: ${(err as Error).message}`);
+      process.exit(1);
+    }
+  }
+  console.error('');
+
+  try {
+    const tokens = await generateSessionTokens({
+      headless: !options.visible,
+      proxy,
+      humanBehavior: options.human,
+    });
+
+    const output = JSON.stringify(tokens, null, 2);
+
+    if (options.output) {
+      const { writeFileSync } = await import('fs');
+      writeFileSync(options.output, output);
+      console.error(`✅ Tokens saved to: ${options.output}`);
+    } else {
+      console.log(output);
+    }
+
+    if (tokens.expiresAt) {
+      const expiresIn = Math.round((tokens.expiresAt - Date.now()) / 1000 / 60);
+      console.error(`\nTokens expire in ~${expiresIn} minutes`);
+    }
+  } catch (error) {
+    console.error(`Error: ${(error as Error).message}`);
+    process.exit(1);
+  }
+}
+
+async function runGenerateSearch(keyword: string, options: CLIOptions): Promise<void> {
+  console.error(`Generating search for: "${keyword}"`);
+  console.error(`Visible browser: ${options.visible}`);
+  console.error('');
+
+  // Resolve proxy if specified
+  let proxy: ProxyConfig | undefined;
+  if (options.proxy) {
+    proxy = parseProxyUrl(options.proxy);
+    console.error(`Proxy: ${proxy.server}`);
+  } else if (options.autoProxy) {
+    const providerConfig = parseProxyProviderFromEnv();
+    if (!providerConfig) {
+      console.error('Error: --proxy requires IPFOXY_API_TOKEN to be set for auto-fetch');
+      process.exit(1);
+    }
+    console.error(`Fetching proxy from ${providerConfig.provider}...`);
+    try {
+      const result = await fetchProxies(providerConfig, 1);
+      if (result.proxies.length === 0) {
+        throw new Error('No proxies returned');
+      }
+      proxy = result.proxies[0];
+      console.error(`Proxy: ${proxy!.server} (auto-fetched)`);
+    } catch (err) {
+      console.error(`Error fetching proxy: ${(err as Error).message}`);
+      process.exit(1);
+    }
+  }
+  console.error('');
+
+  try {
+    const search = await generateSearch(keyword, {
+      headless: !options.visible,
+      proxy,
+      humanBehavior: options.human,
+    });
+
+    const output = JSON.stringify(search, null, 2);
+
+    if (options.output) {
+      const { writeFileSync } = await import('fs');
+      writeFileSync(options.output, output);
+      console.error(`✅ Search data saved to: ${options.output}`);
+    } else {
+      console.log(output);
+    }
+
+    console.error(`\n📊 Search Summary:`);
+    console.error(`   Query: "${search.query}"`);
+    console.error(`   SearchId: ${search.searchId}`);
+    console.error(`   Total Results: ${search.totalResults}`);
+    if (search.tokens.expiresAt) {
+      const expiresIn = Math.round((search.tokens.expiresAt - Date.now()) / 1000 / 60);
+      console.error(`   Tokens expire in: ~${expiresIn} minutes`);
+    }
+    console.error(`\n💡 Use this data with IMPIHttpClient in your serverless function.`);
+  } catch (error) {
+    console.error(`Error: ${(error as Error).message}`);
+    process.exit(1);
+  }
+}
+
 async function main(): Promise<void> {
   const { command, keywords, options } = parseCliArgs();
 
@@ -475,6 +611,22 @@ async function main(): Promise<void> {
   if (command === 'fetch-proxies') {
     const count = keywords[0] ? parseInt(keywords[0], 10) : 1;
     await runFetchProxies(count);
+    return;
+  }
+
+  if (command === 'generate-tokens') {
+    await runGenerateTokens(options);
+    return;
+  }
+
+  if (command === 'generate-search') {
+    const keyword = keywords.join(' ');
+    if (!keyword) {
+      console.error('Error: keyword is required');
+      console.error('Usage: tsx cli.ts generate-search <keyword>');
+      process.exit(1);
+    }
+    await runGenerateSearch(keyword, options);
     return;
   }
 
