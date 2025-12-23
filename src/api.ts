@@ -89,6 +89,8 @@ export interface IMPIApiClientOptions extends IMPIScraperOptions {
   keepBrowserOpen?: boolean;
   /** Session token refresh interval in ms (default: 25 minutes) */
   tokenRefreshIntervalMs?: number;
+  /** Minimum delay between API calls (ms). Deprecated alias: rateLimitMs. */
+  apiRateLimitMs?: number;
 }
 
 /**
@@ -155,6 +157,8 @@ export class IMPIApiClient {
       tokenRefreshIntervalMs: 25 * 60 * 1000, // 25 minutes (JWT typically expires in 30min)
       ...options,
       proxy: resolvedProxy,
+      apiRateLimitMs: options.apiRateLimitMs ?? options.rateLimitMs ?? 100,
+      rateLimitMs: options.rateLimitMs ?? options.apiRateLimitMs ?? 100,
     };
   }
 
@@ -757,7 +761,8 @@ export class IMPIApiClient {
       );
     }
 
-    return response.json();
+    const data = await response.json() as IMPISearchResponse;
+    return data;
   }
 
   /**
@@ -786,7 +791,8 @@ export class IMPIApiClient {
       );
     }
 
-    return response.json();
+    const data = await response.json() as IMPIDetailsResponse;
+    return data;
   }
 
   /**
@@ -1107,6 +1113,8 @@ export class IMPIConcurrentPool {
       browserTimeoutMs: 300000,
       debug: false,
       screenshotDir: './screenshots',
+      apiRateLimitMs: options.apiRateLimitMs ?? options.rateLimitMs ?? 100,
+      rateLimitMs: options.rateLimitMs ?? options.apiRateLimitMs ?? 100,
       keepBrowserOpen: false,
       tokenRefreshIntervalMs: 25 * 60 * 1000,
       concurrency: 1,
@@ -1773,7 +1781,8 @@ export class IMPIHttpClient {
       );
     }
 
-    return response.json();
+    const data = await response.json() as IMPISearchResponse;
+    return data;
   }
 
   /**
@@ -1823,7 +1832,8 @@ export class IMPIHttpClient {
       );
     }
 
-    return response.json();
+    const data = await response.json() as IMPIDetailsResponse;
+    return data;
   }
 
   /**

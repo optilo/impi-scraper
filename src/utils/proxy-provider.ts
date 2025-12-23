@@ -65,7 +65,7 @@ export async function fetchIPFoxyProxies(
       throw new Error(`IPFoxy API error (${response.status}): ${text}`);
     }
 
-    const json: IPFoxyJsonResponse = await response.json();
+    const json = (await response.json()) as IPFoxyJsonResponse;
 
     // Check API response code
     if (json.code !== 0) {

@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.4.3] - 2025-12-23
+
+### Fixed
+- Added `apiRateLimitMs` / `rateLimitMs` to option types and defaults for CLI/examples/tests type safety.
+- Casted API responses and IPFoxy JSON to concrete types to satisfy strict type checking.
+- Browser-behavior helpers now use `globalThis` to avoid `window` references without DOM libs.
+- Live count test now catches native binary mismatches and skips cleanly (logs a warning).
+
+## [3.4.2] - 2025-12-23
+
+### Fixed
+- Live count test now auto-fetches Camoufox if missing and skips gracefully when network or native rebuilds are unavailable in CI.
+- Better-sqlite3 rebuild failures no longer break the suite; the live test skips with a clear message instead.
+
 ## [3.4.1] - 2025-12-23
 
 ### Fixed

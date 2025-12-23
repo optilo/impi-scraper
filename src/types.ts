@@ -88,6 +88,10 @@ export interface IMPIScraperOptions {
   browserTimeoutMs?: number;     // Timeout before refreshing browser (default: 300000 = 5min)
   debug?: boolean;               // Enable debug mode: saves screenshots on errors/blocks
   screenshotDir?: string;        // Directory for debug screenshots (default: ./screenshots)
+  /** Minimum delay between API calls (ms). Deprecated alias: rateLimitMs. */
+  apiRateLimitMs?: number;
+  /** @deprecated use apiRateLimitMs */
+  rateLimitMs?: number;
 }
 
 export interface SearchMetadata {

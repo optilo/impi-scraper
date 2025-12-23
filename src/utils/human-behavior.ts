@@ -33,8 +33,8 @@ export async function addHumanBehavior(page: Page): Promise<void> {
  */
 export async function smoothMouseMove(page: Page, targetX: number, targetY: number, steps = 10): Promise<void> {
   const currentPos = await page.evaluate(() => ({
-    x: Math.random() * window.innerWidth,
-    y: Math.random() * window.innerHeight
+    x: Math.random() * (globalThis as any).innerWidth,
+    y: Math.random() * (globalThis as any).innerHeight
   }));
 
   for (let i = 0; i <= steps; i++) {
@@ -64,7 +64,7 @@ export async function humanScroll(page: Page, direction: 'up' | 'down' = 'down',
         return;
       }
 
-      window.scrollBy(0, stepAmount);
+      (globalThis as any).scrollBy(0, stepAmount);
       currentStep++;
     }, 50 + Math.random() * 50);
   }, scrollAmount);
