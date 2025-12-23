@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [3.4.3] - 2025-12-23
+## [3.4.4] - 2025-12-23
 
 ### Fixed
 - Added `apiRateLimitMs` / `rateLimitMs` to option types and defaults for CLI/examples/tests type safety.
