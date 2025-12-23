@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.4.1] - 2025-12-23
+
+### Fixed
+
+- Live count test now auto-fetches Camoufox if missing and skips gracefully when network or native rebuilds are unavailable in CI.
+- Better-sqlite3 rebuild failures no longer break the suite; the live test skips with a clear message instead.
+
 ## [3.4.0] - 2025-12-22
 
 ### Changed
