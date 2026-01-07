@@ -936,12 +936,14 @@ export class IMPIApiClient {
    * @param url - IMPI search URL (e.g., https://marcia.impi.gob.mx/marcas/search/result?s=UUID&m=l&page=1)
    * @param options - Optional parameters for pagination control
    * @param options.startPage - Page to start from (0-indexed, default: 0). Use for resuming interrupted scrapes.
+   * @param options.concurrency - Number of pages to fetch in parallel (default: 1)
    * @returns Search results with metadata
    */
-  async searchByUrl(url: string, options?: { startPage?: number }): Promise<SearchResults> {
+  async searchByUrl(url: string, options?: { startPage?: number; concurrency?: number }): Promise<SearchResults> {
     const startTime = Date.now();
     const startPage = options?.startPage ?? 0;
-    log.info(`Searching by URL: ${url}${startPage > 0 ? ` (starting from page ${startPage})` : ''}`);
+    const concurrency = options?.concurrency ?? 1;
+    log.info(`Searching by URL: ${url}${startPage > 0 ? ` (starting from page ${startPage})` : ''}${concurrency > 1 ? ` (concurrency: ${concurrency})` : ''}`);
 
     // Parse URL and extract searchId
     const searchId = parseIMPISearchUrl(url);
@@ -1004,28 +1006,75 @@ export class IMPIApiClient {
       return this.buildSearchResults(queryLabel, searchId, url, totalResults, allResults.slice(0, this.options.maxResults), startTime);
     }
 
-    // Fetch remaining pages
+    // Calculate remaining pages to fetch
+    const remainingPages: number[] = [];
     for (let page = startPage + 1; page < totalPages; page++) {
-      log.info(`Fetching page ${page + 1}/${totalPages} (offset: ${page * pageSize})...`);
-
-      const pageResults = await this.getSearchResults(searchId, page, pageSize);
-      const processedResults = this.processRawResults(pageResults.resultPage, queryLabel, searchId);
-      allResults.push(...processedResults);
-
-      // Notify progress callback
-      if (this.onPageFetched) {
-        await this.onPageFetched({
-          page,
-          totalPages,
-          resultsFetched: allResults.length,
-          totalResults,
-          results: processedResults
-        });
-      }
-
-      // Apply max results limit
-      if (this.options.maxResults > 0 && allResults.length >= this.options.maxResults) {
+      remainingPages.push(page);
+      // Stop if we'll exceed max results
+      if (this.options.maxResults > 0 && (page + 1) * pageSize >= this.options.maxResults) {
         break;
+      }
+    }
+
+    // Fetch remaining pages with concurrency
+    if (concurrency > 1 && remainingPages.length > 0) {
+      // Concurrent fetching in batches
+      for (let i = 0; i < remainingPages.length; i += concurrency) {
+        const batch = remainingPages.slice(i, i + concurrency);
+        const batchPromises = batch.map(async (page) => {
+          const pageResults = await this.getSearchResults(searchId, page, pageSize);
+          return { page, results: this.processRawResults(pageResults.resultPage, queryLabel, searchId) };
+        });
+
+        const batchResults = await Promise.all(batchPromises);
+
+        // Sort by page number to maintain order
+        batchResults.sort((a, b) => a.page - b.page);
+
+        for (const { page, results: processedResults } of batchResults) {
+          allResults.push(...processedResults);
+
+          // Notify progress callback
+          if (this.onPageFetched) {
+            await this.onPageFetched({
+              page,
+              totalPages,
+              resultsFetched: allResults.length,
+              totalResults,
+              results: processedResults
+            });
+          }
+        }
+
+        // Check max results after batch
+        if (this.options.maxResults > 0 && allResults.length >= this.options.maxResults) {
+          break;
+        }
+      }
+    } else {
+      // Sequential fetching (original behavior)
+      for (const page of remainingPages) {
+        log.info(`Fetching page ${page + 1}/${totalPages} (offset: ${page * pageSize})...`);
+
+        const pageResults = await this.getSearchResults(searchId, page, pageSize);
+        const processedResults = this.processRawResults(pageResults.resultPage, queryLabel, searchId);
+        allResults.push(...processedResults);
+
+        // Notify progress callback
+        if (this.onPageFetched) {
+          await this.onPageFetched({
+            page,
+            totalPages,
+            resultsFetched: allResults.length,
+            totalResults,
+            results: processedResults
+          });
+        }
+
+        // Apply max results limit
+        if (this.options.maxResults > 0 && allResults.length >= this.options.maxResults) {
+          break;
+        }
       }
     }
 

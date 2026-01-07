@@ -104,6 +104,9 @@ URL SEARCH (with pre-applied filters):
   # Scrape ALL results from an IMPI search URL (saves progress incrementally)
   tsx cli.ts search-url "https://marcia.impi.gob.mx/marcas/search/result?s=UUID&m=l" -o results.json
 
+  # With concurrency (5 pages fetched in parallel - much faster!)
+  tsx cli.ts search-url "URL" -o results.json --concurrency 5
+
   # With full details
   tsx cli.ts search-url "https://marcia.impi.gob.mx/marcas/search/result?s=UUID" --full -o results.json
 
@@ -754,14 +757,39 @@ async function runGenerateBatch(queries: string[], options: CLIOptions): Promise
   }
 }
 
+function formatProgressBar(current: number, total: number, width: number = 30): string {
+  const percent = Math.min(100, Math.round((current / total) * 100));
+  const filled = Math.round((current / total) * width);
+  const empty = width - filled;
+  const bar = '█'.repeat(filled) + '░'.repeat(empty);
+  return `[${bar}] ${percent}%`;
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${minutes}m ${secs}s`;
+}
+
+function formatETA(remainingPages: number, msPerPage: number): string {
+  if (msPerPage === 0) return 'calculating...';
+  const etaMs = remainingPages * msPerPage;
+  return formatDuration(etaMs);
+}
+
 async function runSearchByUrl(url: string, options: CLIOptions): Promise<void> {
   const { writeFileSync, appendFileSync, existsSync } = await import('fs');
 
-  console.error(`Searching IMPI by URL...`);
+  console.error(`\n${'═'.repeat(60)}`);
+  console.error(`  IMPI URL Search`);
+  console.error(`${'═'.repeat(60)}`);
   console.error(`URL: ${url}`);
-  console.error(`Details: ${options.full ? 'full' : 'basic'} | Human: ${options.human ? 'on' : 'off'}${options.debug ? ' | Debug: ON' : ''}`);
+  console.error(`Mode: ${options.full ? 'full details' : 'basic'} | Concurrency: ${options.concurrency}`);
   if (options.startPage > 0) {
-    console.error(`Starting from page: ${options.startPage} (resuming)`);
+    console.error(`Resuming from page: ${options.startPage}`);
   }
 
   // Validate URL
@@ -771,7 +799,7 @@ async function runSearchByUrl(url: string, options: CLIOptions): Promise<void> {
     console.error('Expected format: https://marcia.impi.gob.mx/marcas/search/result?s=UUID&m=l');
     process.exit(1);
   }
-  console.error(`Search ID: ${searchId}`);
+  console.error(`Search ID: ${searchId.substring(0, 8)}...`);
 
   // Resolve proxy: explicit URL > auto-fetch > env > none
   let proxy: ProxyConfig | undefined;
@@ -797,10 +825,8 @@ async function runSearchByUrl(url: string, options: CLIOptions): Promise<void> {
       console.error(`Error fetching proxy: ${(err as Error).message}`);
       process.exit(1);
     }
-  } else {
-    console.error(`Proxy: from env or none`);
   }
-  console.error('');
+  console.error(`${'─'.repeat(60)}`);
 
   // Determine output file for incremental saving
   const progressFile = options.output ? `${options.output}.progress.jsonl` : null;
@@ -817,6 +843,11 @@ async function runSearchByUrl(url: string, options: CLIOptions): Promise<void> {
     writeFileSync(progressFile, '');
   }
 
+  // Track timing for ETA calculation
+  let lastPageTime = Date.now();
+  let avgPageTime = 0;
+  let pageCount = 0;
+
   try {
     const client = new IMPIApiClient({
       headless: true,
@@ -832,21 +863,47 @@ async function runSearchByUrl(url: string, options: CLIOptions): Promise<void> {
     client.onPageFetched = async (progress) => {
       const { page, totalPages, resultsFetched, totalResults, results: pageResults } = progress;
 
-      // Print progress to stderr
-      console.error(`✓ Page ${page + 1}/${totalPages} fetched (${resultsFetched}/${totalResults} results)`);
-      console.error(`  → To resume from here if interrupted: --start-page ${page + 1}`);
+      // Calculate timing
+      const now = Date.now();
+      const pageTime = now - lastPageTime;
+      lastPageTime = now;
+      pageCount++;
+      avgPageTime = avgPageTime === 0 ? pageTime : (avgPageTime * 0.7 + pageTime * 0.3); // Weighted average
+
+      const remainingPages = totalPages - page - 1;
+      const eta = formatETA(remainingPages, avgPageTime / (options.concurrency || 1));
+
+      // Clear line and print progress
+      process.stderr.write('\r\x1b[K'); // Clear current line
+
+      // Progress bar
+      const progressBar = formatProgressBar(resultsFetched, totalResults);
+      const pageInfo = `Page ${page + 1}/${totalPages}`;
+      const resultsInfo = `${resultsFetched.toLocaleString()}/${totalResults.toLocaleString()} results`;
+
+      console.error(`${progressBar} ${pageInfo} | ${resultsInfo} | ETA: ${eta}`);
+
+      // Show resume info (less verbose)
+      if (page % 10 === 0 || page === totalPages - 1) {
+        console.error(`  💾 Resume: --start-page ${page + 1}`);
+      }
 
       // Save results incrementally to progress file (JSONL format)
       if (progressFile && pageResults.length > 0) {
         const lines = pageResults.map(r => JSON.stringify(r)).join('\n') + '\n';
         appendFileSync(progressFile, lines);
         totalSaved += pageResults.length;
-        console.error(`  → Saved ${pageResults.length} results to ${progressFile} (total: ${totalSaved})`);
       }
     };
 
-    const results = await client.searchByUrl(url, { startPage: options.startPage });
+    console.error(`Initializing session...`);
+    const startTime = Date.now();
+    const results = await client.searchByUrl(url, {
+      startPage: options.startPage,
+      concurrency: options.concurrency
+    });
     await client.close();
+    const totalTime = Date.now() - startTime;
 
     // Format final output
     let output: string;
@@ -863,22 +920,31 @@ async function runSearchByUrl(url: string, options: CLIOptions): Promise<void> {
     }
 
     // Output to file or stdout
+    console.error(`\n${'═'.repeat(60)}`);
+    console.error(`  ✅ Complete!`);
+    console.error(`${'═'.repeat(60)}`);
+
     if (options.output) {
       writeFileSync(options.output, output);
-      console.error(`\n✓ Final results saved to: ${options.output}`);
+      console.error(`Results: ${options.output}`);
       if (progressFile) {
-        console.error(`  Progress file: ${progressFile} (can be deleted)`);
+        console.error(`Progress: ${progressFile} (can be deleted)`);
       }
     } else {
       console.log(output);
     }
 
-    console.error(`\nDone! Found ${results.metadata.totalResults} results, processed ${results.results.length}`);
+    console.error(`${'─'.repeat(60)}`);
+    console.error(`Total: ${results.metadata.totalResults?.toLocaleString()} found, ${results.results.length.toLocaleString()} processed`);
+    console.error(`Time: ${formatDuration(totalTime)} | Speed: ${Math.round(results.results.length / (totalTime / 1000))} results/sec`);
+    console.error(`${'═'.repeat(60)}\n`);
   } catch (error) {
-    console.error(`\n❌ Error: ${(error as Error).message}`);
+    console.error(`\n${'═'.repeat(60)}`);
+    console.error(`  ❌ Error: ${(error as Error).message}`);
+    console.error(`${'═'.repeat(60)}`);
     if (progressFile && totalSaved > 0) {
-      console.error(`\n💡 Progress saved! To resume, run with: --start-page <PAGE_NUMBER>`);
-      console.error(`   Progress file: ${progressFile} (${totalSaved} results saved)`);
+      console.error(`\n💡 Progress saved! Resume with: --start-page <N>`);
+      console.error(`   Progress file: ${progressFile} (${totalSaved} results)`);
     }
     process.exit(1);
   }
