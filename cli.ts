@@ -66,6 +66,7 @@ OPTIONS:
   --debug, -d         Save screenshots on CAPTCHA/blocking detection (to ./screenshots)
   --rate-limit NUM    API rate limit in ms (default: 100 = 10 req/sec)
   --delay NUM         Delay between batch searches in ms (default: 500)
+  --start-page NUM    Page to start from (0-indexed, for resuming search-url)
   --help, -h          Show this help
 
 ENVIRONMENT VARIABLES:
@@ -100,11 +101,14 @@ EXAMPLES:
   tsx cli.ts search vitrum --debug --visible
 
 URL SEARCH (with pre-applied filters):
-  # Scrape ALL results from an IMPI search URL
-  tsx cli.ts search-url "https://marcia.impi.gob.mx/marcas/search/result?s=UUID&m=l"
+  # Scrape ALL results from an IMPI search URL (saves progress incrementally)
+  tsx cli.ts search-url "https://marcia.impi.gob.mx/marcas/search/result?s=UUID&m=l" -o results.json
 
-  # With output file and full details
+  # With full details
   tsx cli.ts search-url "https://marcia.impi.gob.mx/marcas/search/result?s=UUID" --full -o results.json
+
+  # Resume from page 5 if interrupted (check stderr for resume command)
+  tsx cli.ts search-url "https://marcia.impi.gob.mx/marcas/search/result?s=UUID" -o results.json --start-page 5
 
 SERVERLESS/QUEUE WORKFLOW:
   # Generate tokens + searchId locally, then process in serverless
@@ -135,6 +139,7 @@ interface CLIOptions {
   debug: boolean;
   rateLimit: number;
   delay: number; // Delay between batch searches in ms
+  startPage: number; // Page to start from (0-indexed) for resuming
   help: boolean;
 }
 
@@ -221,6 +226,7 @@ function parseCliArgs(): { command: string; keywords: string[]; options: CLIOpti
       debug: { type: 'boolean', short: 'd', default: false },
       'rate-limit': { type: 'string', short: 'r' },
       delay: { type: 'string' },
+      'start-page': { type: 'string' },
       help: { type: 'boolean', short: 'h', default: false },
     },
     allowPositionals: true,
@@ -246,6 +252,7 @@ function parseCliArgs(): { command: string; keywords: string[]; options: CLIOpti
       debug: values.debug as boolean,
       rateLimit: values['rate-limit'] ? parseInt(values['rate-limit'] as string, 10) : 0,
       delay: values.delay ? parseInt(values.delay as string, 10) : 500,
+      startPage: values['start-page'] ? parseInt(values['start-page'] as string, 10) : 0,
       help: values.help as boolean,
     },
   };
@@ -748,9 +755,14 @@ async function runGenerateBatch(queries: string[], options: CLIOptions): Promise
 }
 
 async function runSearchByUrl(url: string, options: CLIOptions): Promise<void> {
+  const { writeFileSync, appendFileSync, existsSync } = await import('fs');
+
   console.error(`Searching IMPI by URL...`);
   console.error(`URL: ${url}`);
   console.error(`Details: ${options.full ? 'full' : 'basic'} | Human: ${options.human ? 'on' : 'off'}${options.debug ? ' | Debug: ON' : ''}`);
+  if (options.startPage > 0) {
+    console.error(`Starting from page: ${options.startPage} (resuming)`);
+  }
 
   // Validate URL
   const searchId = parseIMPISearchUrl(url);
@@ -790,8 +802,23 @@ async function runSearchByUrl(url: string, options: CLIOptions): Promise<void> {
   }
   console.error('');
 
+  // Determine output file for incremental saving
+  const progressFile = options.output ? `${options.output}.progress.jsonl` : null;
+  let totalSaved = 0;
+
+  // If resuming and progress file exists, count existing results
+  if (progressFile && options.startPage > 0 && existsSync(progressFile)) {
+    const { readFileSync } = await import('fs');
+    const lines = readFileSync(progressFile, 'utf-8').split('\n').filter(l => l.trim());
+    totalSaved = lines.length;
+    console.error(`Found ${totalSaved} existing results in progress file`);
+  } else if (progressFile && options.startPage === 0) {
+    // Starting fresh - clear progress file
+    writeFileSync(progressFile, '');
+  }
+
   try {
-    const results = await searchByUrl(url, {
+    const client = new IMPIApiClient({
       headless: true,
       detailLevel: options.full ? 'full' : 'basic',
       humanBehavior: options.human,
@@ -801,7 +828,27 @@ async function runSearchByUrl(url: string, options: CLIOptions): Promise<void> {
       debug: options.debug,
     });
 
-    // Format output
+    // Set up progress callback for incremental saving
+    client.onPageFetched = async (progress) => {
+      const { page, totalPages, resultsFetched, totalResults, results: pageResults } = progress;
+
+      // Print progress to stderr
+      console.error(`✓ Page ${page + 1}/${totalPages} fetched (${resultsFetched}/${totalResults} results)`);
+      console.error(`  → To resume from here if interrupted: --start-page ${page + 1}`);
+
+      // Save results incrementally to progress file (JSONL format)
+      if (progressFile && pageResults.length > 0) {
+        const lines = pageResults.map(r => JSON.stringify(r)).join('\n') + '\n';
+        appendFileSync(progressFile, lines);
+        totalSaved += pageResults.length;
+        console.error(`  → Saved ${pageResults.length} results to ${progressFile} (total: ${totalSaved})`);
+      }
+    };
+
+    const results = await client.searchByUrl(url, { startPage: options.startPage });
+    await client.close();
+
+    // Format final output
     let output: string;
     switch (options.format) {
       case 'table':
@@ -817,16 +864,22 @@ async function runSearchByUrl(url: string, options: CLIOptions): Promise<void> {
 
     // Output to file or stdout
     if (options.output) {
-      const { writeFileSync } = await import('fs');
       writeFileSync(options.output, output);
-      console.error(`Results saved to: ${options.output}`);
+      console.error(`\n✓ Final results saved to: ${options.output}`);
+      if (progressFile) {
+        console.error(`  Progress file: ${progressFile} (can be deleted)`);
+      }
     } else {
       console.log(output);
     }
 
     console.error(`\nDone! Found ${results.metadata.totalResults} results, processed ${results.results.length}`);
   } catch (error) {
-    console.error(`Error: ${(error as Error).message}`);
+    console.error(`\n❌ Error: ${(error as Error).message}`);
+    if (progressFile && totalSaved > 0) {
+      console.error(`\n💡 Progress saved! To resume, run with: --start-page <PAGE_NUMBER>`);
+      console.error(`   Progress file: ${progressFile} (${totalSaved} results saved)`);
+    }
     process.exit(1);
   }
 }
