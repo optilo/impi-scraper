@@ -54,20 +54,22 @@ COMMANDS:
   fetch-proxies            Fetch fresh proxy IPs from configured provider (IPFoxy)
 
 OPTIONS:
-  --full, -f          Fetch full details (owners, classes, history)
-  --output, -o FILE   Output to JSON file (default: prints to stdout)
-  --visible, -v       Show browser window (forces browser mode)
-  --browser           Force full browser mode (slower, more robust)
-  --human             Enable human-like behavior (slower but less detectable)
-  --limit, -l NUM     Limit results to process
-  --format FORMAT     Output format: json, table, summary (default: json)
-  --proxy [URL]       Use proxy. Without URL: auto-fetch from IPFoxy. With URL: use that proxy
-  --concurrency, -c   Number of concurrent workers (default: 1, requires IPFOXY_API_TOKEN)
-  --debug, -d         Save screenshots on CAPTCHA/blocking detection (to ./screenshots)
-  --rate-limit NUM    API rate limit in ms (default: 100 = 10 req/sec)
-  --delay NUM         Delay between batch searches in ms (default: 500)
-  --start-page NUM    Page to start from (0-indexed, for resuming search-url)
-  --help, -h          Show this help
+  --full, -f                   Fetch full details (owners, classes, history, PDF URLs)
+  --output, -o FILE            Output to JSON file (default: prints to stdout)
+  --visible, -v                Show browser window (forces browser mode)
+  --browser                    Force full browser mode (slower, more robust)
+  --human                      Enable human-like behavior (slower but less detectable)
+  --limit, -l NUM              Limit results to process
+  --format FORMAT              Output format: json, table, summary (default: json)
+  --proxy [URL]                Use proxy. Without URL: auto-fetch from IPFoxy. With URL: use that proxy
+  --concurrency, -c NUM        Number of pages to fetch in parallel (default: 1)
+  --details-concurrency NUM    Number of detail requests in parallel for --full mode (default: 5)
+  --debug, -d                  Save screenshots on CAPTCHA/blocking detection (to ./screenshots)
+  --rate-limit NUM             API rate limit in ms (default: 100 = 10 req/sec)
+  --delay NUM                  Delay between batch searches in ms (default: 500)
+  --start-page NUM             Page to start from (0-indexed, for resuming search-url)
+  --start-detail NUM           Detail index to start from (for resuming --full mode)
+  --help, -h                   Show this help
 
 ENVIRONMENT VARIABLES:
   IMPI_PROXY_URL      Proxy URL (alternative to --proxy flag)
@@ -104,14 +106,20 @@ URL SEARCH (with pre-applied filters):
   # Scrape ALL results from an IMPI search URL (saves progress incrementally)
   tsx cli.ts search-url "https://marcia.impi.gob.mx/marcas/search/result?s=UUID&m=l" -o results.json
 
-  # With concurrency (5 pages fetched in parallel - much faster!)
+  # With page concurrency (5 pages fetched in parallel - much faster!)
   tsx cli.ts search-url "URL" -o results.json --concurrency 5
 
-  # With full details
-  tsx cli.ts search-url "https://marcia.impi.gob.mx/marcas/search/result?s=UUID" --full -o results.json
+  # With full details including PDF URLs (fetches history for each result)
+  tsx cli.ts search-url "URL" --full -o results.json --details-concurrency 10
+
+  # Full mode with limits (get first 1000 results with full details)
+  tsx cli.ts search-url "URL" --full --limit 1000 -o results.json --details-concurrency 10
 
   # Resume from page 5 if interrupted (check stderr for resume command)
-  tsx cli.ts search-url "https://marcia.impi.gob.mx/marcas/search/result?s=UUID" -o results.json --start-page 5
+  tsx cli.ts search-url "URL" -o results.json --start-page 5
+
+  # Resume full mode from detail 500 (check stderr for resume command)
+  tsx cli.ts search-url "URL" --full -o results.json --start-detail 500
 
 SERVERLESS/QUEUE WORKFLOW:
   # Generate tokens + searchId locally, then process in serverless
@@ -139,6 +147,8 @@ interface CLIOptions {
   proxy?: string;
   autoProxy: boolean; // --proxy without URL = auto-fetch from IPFoxy
   concurrency: number;
+  detailsConcurrency: number; // Number of detail requests in parallel (for --full mode)
+  startDetail: number; // Detail index to start from (for resuming --full mode)
   debug: boolean;
   rateLimit: number;
   delay: number; // Delay between batch searches in ms
@@ -226,6 +236,8 @@ function parseCliArgs(): { command: string; keywords: string[]; options: CLIOpti
       format: { type: 'string', default: 'json' },
       proxy: { type: 'string', short: 'p' },
       concurrency: { type: 'string', short: 'c' },
+      'details-concurrency': { type: 'string' },
+      'start-detail': { type: 'string' },
       debug: { type: 'boolean', short: 'd', default: false },
       'rate-limit': { type: 'string', short: 'r' },
       delay: { type: 'string' },
@@ -252,6 +264,8 @@ function parseCliArgs(): { command: string; keywords: string[]; options: CLIOpti
       proxy: values.proxy as string | undefined,
       autoProxy,
       concurrency: values.concurrency ? parseInt(values.concurrency as string, 10) : 1,
+      detailsConcurrency: values['details-concurrency'] ? parseInt(values['details-concurrency'] as string, 10) : 5,
+      startDetail: values['start-detail'] ? parseInt(values['start-detail'] as string, 10) : 0,
       debug: values.debug as boolean,
       rateLimit: values['rate-limit'] ? parseInt(values['rate-limit'] as string, 10) : 0,
       delay: values.delay ? parseInt(values.delay as string, 10) : 500,
@@ -787,9 +801,15 @@ async function runSearchByUrl(url: string, options: CLIOptions): Promise<void> {
   console.error(`  IMPI URL Search`);
   console.error(`${'═'.repeat(60)}`);
   console.error(`URL: ${url}`);
-  console.error(`Mode: ${options.full ? 'full details' : 'basic'} | Concurrency: ${options.concurrency}`);
+  console.error(`Mode: ${options.full ? 'full details' : 'basic'} | Page concurrency: ${options.concurrency}`);
+  if (options.full) {
+    console.error(`Details concurrency: ${options.detailsConcurrency}`);
+  }
   if (options.startPage > 0) {
     console.error(`Resuming from page: ${options.startPage}`);
+  }
+  if (options.startDetail > 0 && options.full) {
+    console.error(`Resuming details from index: ${options.startDetail}`);
   }
 
   // Validate URL
@@ -888,19 +908,66 @@ async function runSearchByUrl(url: string, options: CLIOptions): Promise<void> {
         console.error(`  💾 Resume: --start-page ${page + 1}`);
       }
 
-      // Save results incrementally to progress file (JSONL format)
-      if (progressFile && pageResults.length > 0) {
+      // Save results incrementally to progress file (JSONL format) - but not in full mode (we save per detail)
+      if (progressFile && pageResults.length > 0 && !options.full) {
         const lines = pageResults.map(r => JSON.stringify(r)).join('\n') + '\n';
         appendFileSync(progressFile, lines);
         totalSaved += pageResults.length;
       }
     };
 
+    // Set up details progress callback for full mode
+    let detailStartTime = Date.now();
+    let detailCount = 0;
+    let avgDetailTime = 0;
+    let pdfUrlsFound = 0;
+
+    if (options.full) {
+      client.onDetailFetched = async (progress) => {
+        const { current, total, result, hasHistory, pdfUrls } = progress;
+
+        // Calculate timing
+        const now = Date.now();
+        const detailTime = now - detailStartTime;
+        detailStartTime = now;
+        detailCount++;
+        avgDetailTime = avgDetailTime === 0 ? detailTime : (avgDetailTime * 0.7 + detailTime * 0.3);
+        pdfUrlsFound += pdfUrls.length;
+
+        const remainingDetails = total - current;
+        const etaMs = remainingDetails * (avgDetailTime / (options.detailsConcurrency || 1));
+        const eta = formatDuration(etaMs);
+
+        // Clear line and print progress
+        process.stderr.write('\r\x1b[K'); // Clear current line
+
+        // Progress bar
+        const progressBar = formatProgressBar(current, total);
+        const detailInfo = `Detail ${current.toLocaleString()}/${total.toLocaleString()}`;
+        const pdfInfo = `PDFs: ${pdfUrlsFound.toLocaleString()}`;
+
+        console.error(`${progressBar} ${detailInfo} | ${pdfInfo} | ETA: ${eta}`);
+
+        // Show resume info periodically
+        if (current % 100 === 0 || current === total) {
+          console.error(`  💾 Resume: --start-detail ${current}`);
+        }
+
+        // Save result incrementally to progress file (JSONL format)
+        if (progressFile) {
+          appendFileSync(progressFile, JSON.stringify(result) + '\n');
+          totalSaved++;
+        }
+      };
+    }
+
     console.error(`Initializing session...`);
     const startTime = Date.now();
     const results = await client.searchByUrl(url, {
       startPage: options.startPage,
-      concurrency: options.concurrency
+      concurrency: options.concurrency,
+      detailsConcurrency: options.detailsConcurrency,
+      startDetail: options.startDetail,
     });
     await client.close();
     const totalTime = Date.now() - startTime;

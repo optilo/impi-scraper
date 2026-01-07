@@ -3,7 +3,7 @@
  */
 
 import type { Page } from 'playwright-core';
-import type { ProxyConfig } from '../types';
+import type { ProxyConfig } from '../types.js';
 
 /**
  * IP check services (in order of preference)

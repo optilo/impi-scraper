@@ -5,7 +5,7 @@
  * Currently supports: IPFoxy
  */
 
-import type { ProxyConfig } from '../types';
+import type { ProxyConfig } from '../types.js';
 
 export interface ProxyProviderConfig {
   provider: 'ipfoxy';

@@ -84,15 +84,57 @@ If you've manually applied filters on the IMPI website and want to scrape ALL ma
 # Copy the URL from your browser after applying filters
 tsx cli.ts search-url "https://marcia.impi.gob.mx/marcas/search/result?s=3660137d-fcbc-42b8-801b-21697102d9dd&m=l"
 
-# With full details
-tsx cli.ts search-url "https://marcia.impi.gob.mx/marcas/search/result?s=UUID&m=l" --full
+# With page concurrency (5 pages fetched in parallel - much faster!)
+tsx cli.ts search-url "URL" -o results.json --concurrency 5
 
 # Output to file
 tsx cli.ts search-url "https://marcia.impi.gob.mx/marcas/search/result?s=UUID" -o filtered-results.json
 
+# Resume from page 5 if interrupted (check stderr for resume command)
+tsx cli.ts search-url "URL" -o results.json --start-page 5
+
 # With proxy
 tsx cli.ts search-url "https://marcia.impi.gob.mx/marcas/search/result?s=UUID" --proxy
 ```
+
+#### Full Mode with PDF URLs
+
+Use `--full` to fetch complete details including history and PDF URLs for each result:
+
+```bash
+# Fetch first 1000 results with full details (including PDF URLs)
+tsx cli.ts search-url "URL" --full --limit 1000 -o results.json --details-concurrency 10
+
+# With both page and details concurrency for maximum speed
+tsx cli.ts search-url "URL" --full --limit 5000 -o results.json --concurrency 5 --details-concurrency 10
+
+# Resume full mode from detail 500 if interrupted
+tsx cli.ts search-url "URL" --full -o results.json --start-detail 500
+```
+
+The `--full` mode adds an extra API call per result to fetch:
+- Complete owner information (name, address, city, state, country)
+- Detailed class information with goods/services descriptions
+- Full history with PDF URLs for each procedure entry
+
+**PDF URLs** are found in the `history` array:
+```json
+{
+  "history": [
+    {
+      "description": "REGISTRO DE MARCA",
+      "pdfUrl": "https://acervomarcas.impi.gob.mx:8181/marcanet/UCMServlet?info=...",
+      "startDate": "2020-01-15",
+      ...
+    }
+  ]
+}
+```
+
+**Note**: Full mode is slower due to extra API calls. For 158k results, consider:
+- Using `--limit` to process in batches
+- Increasing `--details-concurrency` (default: 5, recommended: 10-20)
+- Progress is saved incrementally to `.progress.jsonl` for resume capability
 
 ### CLI Commands
 
@@ -119,15 +161,17 @@ tsx cli.ts fetch-proxies [count]
 
 | Option | Short | Description |
 |--------|-------|-------------|
-| `--full` | `-f` | Fetch full details (owners, classes, history) |
+| `--full` | `-f` | Fetch full details (owners, classes, history, PDF URLs) |
 | `--output FILE` | `-o` | Output to JSON file |
 | `--visible` | `-v` | Show browser window |
 | `--human` | | Enable human-like behavior (slower) |
 | `--limit NUM` | `-l` | Limit number of results |
 | `--format` | | Output format: json, table, summary |
 | `--proxy URL` | `-p` | Proxy server URL |
-| `--concurrency NUM` | `-c` | Number of concurrent workers (default: 1) |
-| `--rate-limit NUM` | | (deprecated) |
+| `--concurrency NUM` | `-c` | Number of pages to fetch in parallel (default: 1) |
+| `--details-concurrency NUM` | | Number of detail requests in parallel for --full mode (default: 5) |
+| `--start-page NUM` | | Page to start from (0-indexed, for resuming) |
+| `--start-detail NUM` | | Detail index to start from (for resuming --full mode) |
 | `--delay NUM` | | Delay between batch searches in ms (default: 500) |
 | `--debug` | `-d` | Save screenshots on CAPTCHA/blocking detection |
 | `--help` | `-h` | Show help |

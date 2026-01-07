@@ -231,7 +231,7 @@ export class IMPIApiClient {
     const proxy = result.proxies[0];
     if (proxy) {
       this.options.proxy = proxy;
-      log.info(`Using auto-fetched proxy: ${this.options.proxy.server}`);
+      log.info(`Using auto-fetched proxy: ${proxy.server}`);
     }
   }
 
@@ -931,15 +931,28 @@ export class IMPIApiClient {
   }) => void | Promise<void>;
 
   /**
+   * Progress callback for full mode - called after each detail is fetched
+   */
+  public onDetailFetched?: (progress: {
+    current: number;
+    total: number;
+    result: TrademarkResult;
+    hasHistory: boolean;
+    pdfUrls: string[];
+  }) => void | Promise<void>;
+
+  /**
    * Search by URL - accepts an existing IMPI search URL and scrapes all results
    * This is useful when you've manually applied filters on the IMPI website and want to scrape all matching results.
    * @param url - IMPI search URL (e.g., https://marcia.impi.gob.mx/marcas/search/result?s=UUID&m=l&page=1)
    * @param options - Optional parameters for pagination control
    * @param options.startPage - Page to start from (0-indexed, default: 0). Use for resuming interrupted scrapes.
    * @param options.concurrency - Number of pages to fetch in parallel (default: 1)
+   * @param options.detailsConcurrency - Number of details to fetch in parallel when in full mode (default: 5)
+   * @param options.startDetail - Index to start detail fetching from (0-indexed, default: 0). Use for resuming interrupted full mode scrapes.
    * @returns Search results with metadata
    */
-  async searchByUrl(url: string, options?: { startPage?: number; concurrency?: number }): Promise<SearchResults> {
+  async searchByUrl(url: string, options?: { startPage?: number; concurrency?: number; detailsConcurrency?: number; startDetail?: number }): Promise<SearchResults> {
     const startTime = Date.now();
     const startPage = options?.startPage ?? 0;
     const concurrency = options?.concurrency ?? 1;
@@ -1001,18 +1014,18 @@ export class IMPIApiClient {
       });
     }
 
-    // Check if we've hit max results
-    if (this.options.maxResults > 0 && allResults.length >= this.options.maxResults) {
-      return this.buildSearchResults(queryLabel, searchId, url, totalResults, allResults.slice(0, this.options.maxResults), startTime);
-    }
+    // Check if we've hit max results - but don't return early, let full mode code run
+    const maxResultsReached = this.options.maxResults > 0 && allResults.length >= this.options.maxResults;
 
-    // Calculate remaining pages to fetch
+    // Calculate remaining pages to fetch (only if max results not reached)
     const remainingPages: number[] = [];
-    for (let page = startPage + 1; page < totalPages; page++) {
-      remainingPages.push(page);
-      // Stop if we'll exceed max results
-      if (this.options.maxResults > 0 && (page + 1) * pageSize >= this.options.maxResults) {
-        break;
+    if (!maxResultsReached) {
+      for (let page = startPage + 1; page < totalPages; page++) {
+        remainingPages.push(page);
+        // Stop if we'll exceed max results
+        if (this.options.maxResults > 0 && (page + 1) * pageSize >= this.options.maxResults) {
+          break;
+        }
       }
     }
 
@@ -1078,9 +1091,95 @@ export class IMPIApiClient {
       }
     }
 
-    // Apply final limit
-    const finalResults = this.options.maxResults > 0 ? allResults.slice(0, this.options.maxResults) : allResults;
-    return this.buildSearchResults(queryLabel, searchId, url, totalResults, finalResults, startTime);
+    // Apply max results limit
+    const limitedResults = this.options.maxResults > 0 ? allResults.slice(0, this.options.maxResults) : allResults;
+
+    // If full mode, fetch details for each result
+    if (this.options.detailLevel === 'full') {
+      const detailsConcurrency = options?.detailsConcurrency ?? 5;
+      const startDetail = options?.startDetail ?? 0;
+      log.info(`Fetching full details for ${limitedResults.length} results (concurrency: ${detailsConcurrency}, starting from index ${startDetail})`);
+
+      const detailedResults: TrademarkResult[] = [];
+
+      // Copy already-processed results if resuming
+      for (let i = 0; i < startDetail && i < limitedResults.length; i++) {
+        detailedResults.push(limitedResults[i]!);
+      }
+
+      // Process remaining results with concurrency
+      const toProcess = limitedResults.slice(startDetail);
+
+      for (let i = 0; i < toProcess.length; i += detailsConcurrency) {
+        const batch = toProcess.slice(i, i + detailsConcurrency);
+        const batchPromises = batch.map(async (basicResult, batchIndex) => {
+          const globalIndex = startDetail + i + batchIndex;
+          try {
+            const details = await this.getTrademarkDetails(basicResult.impiId, searchId);
+            // Re-extract with full details using the raw data pattern
+            const rawTrademark: IMPITrademarkRaw = {
+              id: basicResult.impiId,
+              title: basicResult.title,
+              status: basicResult.status,
+              applicationNumber: basicResult.applicationNumber,
+              registrationNumber: basicResult.registrationNumber || undefined,
+              appType: basicResult.appType,
+              dates: {
+                application: basicResult.applicationDate || undefined,
+                registration: basicResult.registrationDate || undefined,
+                publication: basicResult.publicationDate || undefined,
+                expiry: basicResult.expiryDate || undefined,
+                cancellation: basicResult.cancellationDate || undefined,
+              },
+              goodsAndServices: basicResult.goodsAndServices,
+              images: Array.isArray(basicResult.imageUrl) ? basicResult.imageUrl : [basicResult.imageUrl],
+            };
+            const fullResult = this.extractTrademarkData(rawTrademark, details, queryLabel, searchId);
+            return { index: globalIndex, result: fullResult, success: true };
+          } catch (err) {
+            log.warning(`Failed to get details for ${basicResult.impiId}: ${(err as Error).message}`);
+            return { index: globalIndex, result: basicResult, success: false };
+          }
+        });
+
+        const batchResults = await Promise.all(batchPromises);
+
+        // Sort by index to maintain order
+        batchResults.sort((a, b) => a.index - b.index);
+
+        for (const { result } of batchResults) {
+          detailedResults.push(result);
+
+          // Extract PDF URLs from history
+          const pdfUrls: string[] = [];
+          if (result.history) {
+            for (const hist of result.history) {
+              if (hist.pdfUrl) pdfUrls.push(hist.pdfUrl);
+              if (hist.oficios) {
+                for (const oficio of hist.oficios) {
+                  if (oficio.pdfUrl) pdfUrls.push(oficio.pdfUrl);
+                }
+              }
+            }
+          }
+
+          // Notify progress callback
+          if (this.onDetailFetched) {
+            await this.onDetailFetched({
+              current: detailedResults.length,
+              total: limitedResults.length,
+              result,
+              hasHistory: (result.history?.length ?? 0) > 0,
+              pdfUrls,
+            });
+          }
+        }
+      }
+
+      return this.buildSearchResults(queryLabel, searchId, url, totalResults, detailedResults, startTime);
+    }
+
+    return this.buildSearchResults(queryLabel, searchId, url, totalResults, limitedResults, startTime);
   }
 
   /**
