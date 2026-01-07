@@ -286,6 +286,58 @@ export interface GeneratedSearch {
   generatedAt: string;
 }
 
+/**
+ * Error entry for batch search operations
+ */
+export interface BatchSearchError {
+  /** The query that failed */
+  query: string;
+  /** Error message */
+  error: string;
+  /** Error code if available */
+  code?: string;
+}
+
+/**
+ * Batch search result - tokens + multiple searches in one browser session
+ *
+ * @example Using batch search
+ * ```typescript
+ * // On local machine (has Playwright/Camoufox)
+ * const batch = await generateBatchSearch(['nike', 'adidas', 'puma']);
+ *
+ * // Pass to Trigger.dev or other queue
+ * for (const search of batch.searches) {
+ *   await myTask.trigger({ tokens: batch.tokens, ...search });
+ * }
+ *
+ * // In serverless function (no Playwright needed)
+ * const client = new IMPIHttpClient(payload.tokens);
+ * const results = await client.fetchAllResults(payload.searchId, payload.totalResults);
+ * ```
+ */
+export interface BatchGeneratedSearch {
+  /** Session tokens for API authentication (shared across all searches) */
+  tokens: SessionTokens;
+  /** Successfully generated searches */
+  searches: GeneratedSearchResult[];
+  /** Failed searches with error details */
+  errors: BatchSearchError[];
+  /** Timestamp when batch was generated */
+  generatedAt: string;
+  /** Summary statistics */
+  summary: {
+    /** Total queries attempted */
+    total: number;
+    /** Successfully generated */
+    successful: number;
+    /** Failed to generate */
+    failed: number;
+    /** Total duration in milliseconds */
+    durationMs: number;
+  };
+}
+
 export interface IMPIDetailsResponse {
   details?: {
     generalInformation?: {

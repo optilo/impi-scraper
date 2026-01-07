@@ -25,7 +25,7 @@
 import 'dotenv/config';
 
 import { parseArgs } from 'util';
-import { IMPIApiClient, IMPIConcurrentPool, generateSessionTokens, generateSearch, countTrademarks } from './src/index.ts';
+import { IMPIApiClient, IMPIConcurrentPool, generateSessionTokens, generateSearch, generateBatchSearch, countTrademarks } from './src/index.ts';
 import { parseProxyUrl } from './src/utils/proxy.ts';
 import { fetchProxiesFromEnv, fetchProxies, parseProxyProviderFromEnv } from './src/utils/proxy-provider.ts';
 import type { SearchResults, ProxyConfig } from './src/types.ts';
@@ -37,6 +37,7 @@ USAGE:
   pnpm run search <keyword> [options]
   tsx cli.ts search-many <keyword1> <keyword2> ... [options]
   tsx cli.ts generate-search <keyword>     # For serverless/queue workflows
+  tsx cli.ts generate-batch <q1> <q2> ...  # Batch generation (one browser session)
   tsx cli.ts generate-tokens               # Generate session tokens only
   tsx cli.ts count <keyword>               # Fast count only (no records fetched)
   tsx cli.ts fetch-proxies [count]
@@ -45,6 +46,7 @@ COMMANDS:
   search <keyword>         Search trademarks by keyword
   search-many <keywords>   Search multiple keywords concurrently (with proxies)
   generate-search <query>  Generate tokens + searchId for serverless (outputs JSON)
+  generate-batch <queries> Generate tokens + searchIds for multiple queries (one browser session)
   generate-tokens          Generate session tokens only (outputs JSON)
   count <keyword>          Return only the total result count for a keyword
   fetch-proxies            Fetch fresh proxy IPs from configured provider (IPFoxy)
@@ -61,6 +63,7 @@ OPTIONS:
   --concurrency, -c   Number of concurrent workers (default: 1, requires IPFOXY_API_TOKEN)
   --debug, -d         Save screenshots on CAPTCHA/blocking detection (to ./screenshots)
   --rate-limit NUM    API rate limit in ms (default: 100 = 10 req/sec)
+  --delay NUM         Delay between batch searches in ms (default: 500)
   --help, -h          Show this help
 
 ENVIRONMENT VARIABLES:
@@ -101,6 +104,9 @@ SERVERLESS/QUEUE WORKFLOW:
   # Generate tokens only (reuse for multiple searches)
   tsx cli.ts generate-tokens -o tokens.json
 
+  # Batch generation (one browser session for multiple queries - most efficient!)
+  tsx cli.ts generate-batch nike adidas puma -o batch.json --delay 500
+
   # In your Trigger.dev/Vercel function:
   # const client = new IMPIHttpClient(payload.tokens);
   # const results = await client.fetchAllResults(payload.searchId, payload.totalResults);
@@ -119,6 +125,7 @@ interface CLIOptions {
   concurrency: number;
   debug: boolean;
   rateLimit: number;
+  delay: number; // Delay between batch searches in ms
   help: boolean;
 }
 
@@ -204,6 +211,7 @@ function parseCliArgs(): { command: string; keywords: string[]; options: CLIOpti
       concurrency: { type: 'string', short: 'c' },
       debug: { type: 'boolean', short: 'd', default: false },
       'rate-limit': { type: 'string', short: 'r' },
+      delay: { type: 'string' },
       help: { type: 'boolean', short: 'h', default: false },
     },
     allowPositionals: true,
@@ -228,6 +236,7 @@ function parseCliArgs(): { command: string; keywords: string[]; options: CLIOpti
       concurrency: values.concurrency ? parseInt(values.concurrency as string, 10) : 1,
       debug: values.debug as boolean,
       rateLimit: values['rate-limit'] ? parseInt(values['rate-limit'] as string, 10) : 0,
+      delay: values.delay ? parseInt(values.delay as string, 10) : 500,
       help: values.help as boolean,
     },
   };
@@ -646,6 +655,89 @@ async function runGenerateSearch(keyword: string, options: CLIOptions): Promise<
   }
 }
 
+async function runGenerateBatch(queries: string[], options: CLIOptions): Promise<void> {
+  console.error(`Generating batch search for ${queries.length} queries...`);
+  console.error(`Queries: ${queries.join(', ')}`);
+  console.error(`Visible browser: ${options.visible}`);
+  console.error(`Delay between searches: ${options.delay}ms`);
+  console.error('');
+
+  // Resolve proxy if specified
+  let proxy: ProxyConfig | undefined;
+  if (options.proxy) {
+    proxy = parseProxyUrl(options.proxy);
+    console.error(`Proxy: ${proxy.server}`);
+  } else if (options.autoProxy) {
+    const providerConfig = parseProxyProviderFromEnv();
+    if (!providerConfig) {
+      console.error('Error: --proxy requires IPFOXY_API_TOKEN to be set for auto-fetch');
+      process.exit(1);
+    }
+    console.error(`Fetching proxy from ${providerConfig.provider}...`);
+    try {
+      const result = await fetchProxies(providerConfig, 1);
+      if (result.proxies.length === 0) {
+        throw new Error('No proxies returned');
+      }
+      proxy = result.proxies[0];
+      console.error(`Proxy: ${proxy!.server} (auto-fetched)`);
+    } catch (err) {
+      console.error(`Error fetching proxy: ${(err as Error).message}`);
+      process.exit(1);
+    }
+  }
+  console.error('');
+
+  try {
+    const batch = await generateBatchSearch(queries, {
+      headless: !options.visible,
+      proxy,
+      humanBehavior: options.human,
+      delayBetweenSearchesMs: options.delay,
+    });
+
+    const output = JSON.stringify(batch, null, 2);
+
+    if (options.output) {
+      const { writeFileSync } = await import('fs');
+      writeFileSync(options.output, output);
+      console.error(`✅ Batch data saved to: ${options.output}`);
+    } else {
+      console.log(output);
+    }
+
+    console.error(`\n📊 Batch Summary:`);
+    console.error(`   Total queries: ${batch.summary.total}`);
+    console.error(`   Successful: ${batch.summary.successful}`);
+    console.error(`   Failed: ${batch.summary.failed}`);
+    console.error(`   Duration: ${(batch.summary.durationMs / 1000).toFixed(2)}s`);
+
+    if (batch.searches.length > 0) {
+      console.error(`\n   Searches:`);
+      for (const search of batch.searches) {
+        console.error(`   ✓ "${search.query}": ${search.totalResults} results (searchId: ${search.searchId.substring(0, 8)}...)`);
+      }
+    }
+
+    if (batch.errors.length > 0) {
+      console.error(`\n   Errors:`);
+      for (const err of batch.errors) {
+        console.error(`   ✗ "${err.query}": ${err.error}`);
+      }
+    }
+
+    if (batch.tokens.expiresAt) {
+      const expiresIn = Math.round((batch.tokens.expiresAt - Date.now()) / 1000 / 60);
+      console.error(`\n   Tokens expire in: ~${expiresIn} minutes`);
+    }
+
+    console.error(`\n💡 Use batch.tokens with IMPIHttpClient for each search in serverless.`);
+  } catch (error) {
+    console.error(`Error: ${(error as Error).message}`);
+    process.exit(1);
+  }
+}
+
 async function main(): Promise<void> {
   const { command, keywords, options } = parseCliArgs();
 
@@ -684,6 +776,16 @@ async function main(): Promise<void> {
       process.exit(1);
     }
     await runGenerateSearch(keyword, options);
+    return;
+  }
+
+  if (command === 'generate-batch') {
+    if (keywords.length === 0) {
+      console.error('Error: at least one query is required');
+      console.error('Usage: tsx cli.ts generate-batch <query1> <query2> ... [options]');
+      process.exit(1);
+    }
+    await runGenerateBatch(keywords, options);
     return;
   }
 

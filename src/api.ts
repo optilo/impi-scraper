@@ -14,11 +14,11 @@
 
 import { Camoufox } from 'camoufox-js';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
-import { log } from './utils/logger.ts';
-import { addHumanBehavior, randomDelay } from './utils/human-behavior.ts';
-import { resolveProxyConfig, formatProxyForCamoufox } from './utils/proxy.ts';
-import { fetchProxiesFromEnv } from './utils/proxy-provider.ts';
-import { parseDate } from './utils/data.ts';
+import { log } from './utils/logger.js';
+import { addHumanBehavior, randomDelay } from './utils/human-behavior.js';
+import { resolveProxyConfig, formatProxyForCamoufox } from './utils/proxy.js';
+import { fetchProxiesFromEnv } from './utils/proxy-provider.js';
+import { parseDate } from './utils/data.js';
 import {
   IMPIError,
   type IMPIScraperOptions,
@@ -31,7 +31,9 @@ import {
   type SessionTokens,
   type GeneratedSearchResult,
   type GeneratedSearch,
-} from './types.ts';
+  type BatchGeneratedSearch,
+  type BatchSearchError,
+} from './types.js';
 
 /**
  * Quick search function for IMPI trademarks
@@ -1633,6 +1635,230 @@ export async function generateSearch(
     totalResults,
     query,
     generatedAt: new Date().toISOString(),
+  };
+}
+
+export interface GenerateBatchSearchOptions extends GenerateTokensOptions {
+  /** Delay between searches in ms (default: 500) */
+  delayBetweenSearchesMs?: number;
+  /** Continue on error (default: true) */
+  continueOnError?: boolean;
+}
+
+/**
+ * Generate search tokens and searchIds for multiple queries in ONE browser session.
+ *
+ * This is much more efficient than calling generateSearch() multiple times because:
+ * - Opens browser only once (saves ~2-5s per query)
+ * - Reuses session tokens across all queries
+ * - Single session = faster + cheaper
+ *
+ * @example
+ * ```typescript
+ * // Generate batch locally
+ * const batch = await generateBatchSearch(['nike', 'adidas', 'puma']);
+ * console.log(`Generated ${batch.searches.length} searches, ${batch.errors.length} errors`);
+ *
+ * // Pass each search to Trigger.dev or other queue
+ * for (const search of batch.searches) {
+ *   await myTask.trigger({ tokens: batch.tokens, ...search });
+ * }
+ *
+ * // In serverless function (no Playwright needed)
+ * const client = new IMPIHttpClient(payload.tokens);
+ * const results = await client.fetchAllResults(payload.searchId, payload.totalResults);
+ * ```
+ */
+export async function generateBatchSearch(
+  queries: string[],
+  options: GenerateBatchSearchOptions = {}
+): Promise<BatchGeneratedSearch> {
+  const {
+    headless = true,
+    proxy,
+    humanBehavior = true,
+    delayBetweenSearchesMs = 500,
+    continueOnError = true,
+  } = options;
+
+  const startTime = Date.now();
+  log.info(`Generating batch search for ${queries.length} queries...`);
+
+  const searches: GeneratedSearchResult[] = [];
+  const errors: BatchSearchError[] = [];
+
+  // Generate tokens once
+  const tokens = await generateSessionTokens({ headless, proxy, humanBehavior });
+
+  const formattedProxy = formatProxyForCamoufox(proxy);
+
+  // Create browser session that we'll reuse for all searches
+  const browser = await Camoufox({
+    headless,
+    geoip: true,
+    proxy: formattedProxy,
+  });
+
+  if (!browser) {
+    throw new Error('Failed to create Camoufox browser');
+  }
+
+  try {
+    const context = await browser.newContext({
+      userAgent: IMPI_CONFIG.userAgent,
+    });
+
+    // Inject session cookies
+    await context.addCookies([
+      { name: 'XSRF-TOKEN', value: encodeURIComponent(tokens.xsrfToken), domain: 'marcia.impi.gob.mx', path: '/' },
+      { name: 'JSESSIONID', value: tokens.jsessionId, domain: 'marcia.impi.gob.mx', path: '/' },
+      { name: 'SESSIONTOKEN', value: tokens.sessionToken, domain: 'marcia.impi.gob.mx', path: '/' },
+    ]);
+
+    const page = await context.newPage();
+
+    if (humanBehavior) {
+      await addHumanBehavior(page);
+    }
+
+    // Process each query sequentially
+    for (let i = 0; i < queries.length; i++) {
+      const query = queries[i]!;
+      log.info(`[${i + 1}/${queries.length}] Searching: "${query}"`);
+
+      try {
+        // Intercept API response
+        let searchResponse: IMPISearchResponse | null = null;
+        let resolveSearch: () => void;
+        const searchPromise = new Promise<void>((resolve) => {
+          resolveSearch = resolve;
+        });
+
+        const responseHandler = async (response: any) => {
+          const url = response.url();
+          if (url.includes('/marcas/search/internal')) {
+            try {
+              const data = await response.json();
+              if (data.resultPage) {
+                searchResponse = data;
+                resolveSearch();
+              }
+            } catch {}
+          }
+        };
+
+        page.on('response', responseHandler);
+
+        try {
+          // Navigate and search
+          await page.goto(IMPI_CONFIG.searchUrl, {
+            waitUntil: 'networkidle',
+            timeout: 60000,
+          });
+          await randomDelay(300, 600);
+
+          const searchInput = await page.waitForSelector('input[name="quick"], input[type="text"]', {
+            timeout: 10000,
+          });
+
+          if (!searchInput) {
+            throw new Error('Search input not found');
+          }
+
+          // Clear previous search
+          await searchInput.click({ clickCount: 3 });
+          await searchInput.press('Backspace');
+
+          if (humanBehavior) {
+            await searchInput.type(query, { delay: 30 });
+          } else {
+            await searchInput.fill(query);
+          }
+
+          await randomDelay(100, 300);
+          await searchInput.press('Enter');
+
+          // Wait for response
+          const timeoutPromise = new Promise<void>((_, reject) => {
+            setTimeout(() => reject(new Error('Search timeout')), 30000);
+          });
+
+          await Promise.race([searchPromise, timeoutPromise]).catch(() => {});
+          await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+          await randomDelay(300, 500);
+
+          // Extract searchId from URL
+          const currentUrl = page.url();
+          const searchIdMatch = currentUrl.match(/[?&]s=([a-f0-9-]+)/i);
+          const searchId = searchIdMatch ? searchIdMatch[1]! : '';
+
+          // Handle no results
+          if (!searchResponse) {
+            const bodyText = await page.textContent('body').catch(() => '') || '';
+            if (bodyText.toLowerCase().includes('no hay resultados') ||
+                bodyText.toLowerCase().includes('considera realizar una nueva búsqueda')) {
+              searches.push({ searchId: '', totalResults: 0, query });
+              log.info(`  ✓ "${query}": 0 results`);
+              continue;
+            }
+            throw new Error('Failed to get search results');
+          }
+
+          const response = searchResponse as IMPISearchResponse;
+          searches.push({
+            searchId,
+            totalResults: response.totalResults || response.resultPage.length,
+            query,
+          });
+
+          log.info(`  ✓ "${query}": ${response.totalResults || response.resultPage.length} results`);
+        } finally {
+          page.off('response', responseHandler);
+        }
+
+        // Delay between searches to avoid rate limiting
+        if (i < queries.length - 1 && delayBetweenSearchesMs > 0) {
+          await randomDelay(delayBetweenSearchesMs, delayBetweenSearchesMs + 200);
+        }
+      } catch (err) {
+        const error = err as Error;
+        log.warning(`  ✗ "${query}": ${error.message}`);
+
+        const errorEntry: BatchSearchError = {
+          query,
+          error: error.message,
+        };
+
+        if (err instanceof IMPIError) {
+          errorEntry.code = err.code;
+        }
+
+        errors.push(errorEntry);
+
+        if (!continueOnError) {
+          throw error;
+        }
+      }
+    }
+  } finally {
+    await browser.close();
+  }
+
+  const durationMs = Date.now() - startTime;
+
+  log.info(`Batch complete: ${searches.length} successful, ${errors.length} failed in ${(durationMs / 1000).toFixed(2)}s`);
+
+  return {
+    tokens,
+    searches,
+    errors,
+    generatedAt: new Date().toISOString(),
+    summary: {
+      total: queries.length,
+      successful: searches.length,
+      failed: errors.length,
+      durationMs,
+    },
   };
 }
 

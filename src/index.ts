@@ -33,8 +33,8 @@
  */
 
 // Main API (uses Camoufox for session + direct API calls)
-export { IMPIApiClient, IMPIConcurrentPool, searchTrademarks, countTrademarks } from './api.ts';
-export type { IMPIApiClientOptions, ConcurrentPoolOptions, ConcurrentSearchResult } from './api.ts';
+export { IMPIApiClient, IMPIConcurrentPool, searchTrademarks, countTrademarks } from './api.js';
+export type { IMPIApiClientOptions, ConcurrentPoolOptions, ConcurrentSearchResult } from './api.js';
 
 // Serverless/Queue Architecture Support
 // These functions separate browser-dependent (token generation) from API-only operations
@@ -43,23 +43,26 @@ export {
   generateSessionTokens,
   generateSearchId,
   generateSearch,
+  // Batch generation (one browser session for multiple queries)
+  generateBatchSearch,
   // Pure HTTP client (no browser required - for serverless)
   IMPIHttpClient,
-} from './api.ts';
+} from './api.js';
 
 export type {
   GenerateTokensOptions,
   GenerateSearchIdOptions,
+  GenerateBatchSearchOptions,
   IMPIHttpClientOptions,
-} from './api.ts';
+} from './api.js';
 
 // Proxy utilities
-export { parseProxyUrl, parseProxyFromEnv, resolveProxyConfig, testProxy, isProxyError, getProxyErrorMessage } from './utils/proxy.ts';
-export { fetchProxies, fetchProxiesFromEnv, fetchIPFoxyProxies, parseProxyProviderFromEnv } from './utils/proxy-provider.ts';
-export type { ProxyProviderConfig, ProxyProviderResult } from './utils/proxy-provider.ts';
+export { parseProxyUrl, parseProxyFromEnv, resolveProxyConfig, testProxy, isProxyError, getProxyErrorMessage } from './utils/proxy.js';
+export { fetchProxies, fetchProxiesFromEnv, fetchIPFoxyProxies, parseProxyProviderFromEnv } from './utils/proxy-provider.js';
+export type { ProxyProviderConfig, ProxyProviderResult } from './utils/proxy-provider.js';
 
 // Error handling and types
-export { IMPIError } from './types.ts';
+export { IMPIError } from './types.js';
 export type {
   IMPIScraperOptions,
   ProxyConfig,
@@ -77,4 +80,6 @@ export type {
   SessionTokens,
   GeneratedSearchResult,
   GeneratedSearch,
-} from './types.ts';
+  BatchGeneratedSearch,
+  BatchSearchError,
+} from './types.js';

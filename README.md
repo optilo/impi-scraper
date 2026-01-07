@@ -86,6 +86,9 @@ tsx cli.ts search <keyword> [options]
 # Concurrent search (multiple keywords with multiple proxies)
 tsx cli.ts search-many <keyword1> <keyword2> ... [options]
 
+# Batch generation (one browser session for multiple queries - most efficient!)
+tsx cli.ts generate-batch nike adidas puma -o batch.json
+
 # Fetch fresh proxies from IPFoxy
 tsx cli.ts fetch-proxies [count]
 ```
@@ -103,6 +106,7 @@ tsx cli.ts fetch-proxies [count]
 | `--proxy URL` | `-p` | Proxy server URL |
 | `--concurrency NUM` | `-c` | Number of concurrent workers (default: 1) |
 | `--rate-limit NUM` | | (deprecated) |
+| `--delay NUM` | | Delay between batch searches in ms (default: 500) |
 | `--debug` | `-d` | Save screenshots on CAPTCHA/blocking detection |
 | `--help` | `-h` | Show help |
 
@@ -727,6 +731,9 @@ tsx cli.ts generate-search nike -o nike-search.json
 # Generate session tokens only (reusable for multiple searches)
 tsx cli.ts generate-tokens -o tokens.json
 
+# Batch generation - ONE browser session for multiple queries (most efficient!)
+tsx cli.ts generate-batch nike adidas puma reebok -o batch.json --delay 500
+
 # With proxy
 tsx cli.ts generate-search nike --proxy http://user:pass@proxy:8080
 ```
@@ -756,6 +763,44 @@ console.log(search);
 // Send to your queue system
 await myQueue.trigger(search);
 ```
+
+#### Batch Generation (Most Efficient!)
+
+For multiple queries, use batch generation to open ONE browser session instead of one per query:
+
+```typescript
+import { generateBatchSearch } from '@optilo/impi-scraper';
+
+// This opens ONE browser, performs ALL searches, then closes
+const batch = await generateBatchSearch(['nike', 'adidas', 'puma', 'reebok'], {
+  headless: true,
+  delayBetweenSearchesMs: 500,  // Rate limiting between searches
+  continueOnError: true,        // Don't abort batch on single failure
+});
+
+console.log(batch);
+// {
+//   tokens: { xsrfToken, jsessionId, sessionToken, ... },
+//   searches: [
+//     { query: "nike", searchId: "abc-123", totalResults: 150 },
+//     { query: "adidas", searchId: "def-456", totalResults: 200 },
+//     ...
+//   ],
+//   errors: [],  // Any failed queries
+//   summary: { total: 4, successful: 4, failed: 0, durationMs: 12000 },
+//   generatedAt: "2024-01-15T10:30:00.000Z"
+// }
+
+// Queue each search (all share same tokens)
+for (const search of batch.searches) {
+  await myQueue.trigger({ tokens: batch.tokens, ...search });
+}
+```
+
+**Why batch generation?**
+- 100 queries = 1 browser session (instead of 100)
+- ~2-5 seconds saved per query in browser startup overhead
+- Shared tokens = consistent session across all searches
 
 #### Step 2: Process in Serverless (No Browser)
 
