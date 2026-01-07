@@ -1,6 +1,6 @@
 {
   "name": "@optilo/impi-scraper",
-  "version": "3.5.0",
+  "version": "3.6.0",
   "description": "IMPI (Mexican trademark office) scraper with keyword search and human-like interactions",
   "module": "dist/index.js",
   "main": "dist/index.js",
