@@ -33,7 +33,7 @@
  */
 
 // Main API (uses Camoufox for session + direct API calls)
-export { IMPIApiClient, IMPIConcurrentPool, searchTrademarks, countTrademarks } from './api.js';
+export { IMPIApiClient, IMPIConcurrentPool, searchTrademarks, countTrademarks, searchByUrl, parseIMPISearchUrl } from './api.js';
 export type { IMPIApiClientOptions, ConcurrentPoolOptions, ConcurrentSearchResult } from './api.js';
 
 // Serverless/Queue Architecture Support

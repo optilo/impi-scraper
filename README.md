@@ -7,6 +7,7 @@ A TypeScript scraper for IMPI (Instituto Mexicano de la Propiedad Industrial) - 
 - **API-Only Mode**: Fast direct API calls after session token extraction (10-50x faster than browser scraping)
 - **Camoufox Anti-Detection**: Uses Camoufox (Firefox with anti-detection) for initial session only
 - **Keyword Search**: Search trademarks by keyword
+- **URL Search**: Scrape ALL results from an existing IMPI search URL (with pre-applied filters)
 - **Concurrent Search**: Multiple workers with per-worker proxy rotation
 - **Human-like Behavior**: Simulates real user interactions (mouse movements, typing delays, scrolling)
 - **Proxy Support**: Route requests through HTTP/SOCKS proxies for IP rotation
@@ -75,6 +76,24 @@ pnpm run count:node pacific
 # Requires a valid session (handled automatically)
 ```
 
+### Search by URL (Pre-applied Filters)
+
+If you've manually applied filters on the IMPI website and want to scrape ALL matching results:
+
+```bash
+# Copy the URL from your browser after applying filters
+tsx cli.ts search-url "https://marcia.impi.gob.mx/marcas/search/result?s=3660137d-fcbc-42b8-801b-21697102d9dd&m=l"
+
+# With full details
+tsx cli.ts search-url "https://marcia.impi.gob.mx/marcas/search/result?s=UUID&m=l" --full
+
+# Output to file
+tsx cli.ts search-url "https://marcia.impi.gob.mx/marcas/search/result?s=UUID" -o filtered-results.json
+
+# With proxy
+tsx cli.ts search-url "https://marcia.impi.gob.mx/marcas/search/result?s=UUID" --proxy
+```
+
 ### CLI Commands
 
 ```bash
@@ -82,6 +101,9 @@ pnpm run count:node pacific
 pnpm run search <keyword> [options]
 # or
 tsx cli.ts search <keyword> [options]
+
+# Search by URL (scrape ALL results from pre-filtered search)
+tsx cli.ts search-url <impi-url> [options]
 
 # Concurrent search (multiple keywords with multiple proxies)
 tsx cli.ts search-many <keyword1> <keyword2> ... [options]
@@ -204,6 +226,33 @@ const results = await searchTrademarks('vitrum', {
 });
 
 console.log(`Found ${results.results.length} trademarks`);
+```
+
+### Search by URL
+
+If you've applied filters on the IMPI website and want to scrape all matching results:
+
+```typescript
+import { searchByUrl, parseIMPISearchUrl } from '@optilo/impi-scraper';
+
+// The URL from your browser after applying filters
+const url = 'https://marcia.impi.gob.mx/marcas/search/result?s=3660137d-fcbc-42b8-801b-21697102d9dd&m=l&page=1';
+
+// Optional: validate the URL first
+const searchId = parseIMPISearchUrl(url);
+if (!searchId) {
+  throw new Error('Invalid IMPI URL');
+}
+
+// Scrape ALL results from this search
+const results = await searchByUrl(url, {
+  detailLevel: 'basic',  // or 'full' for complete details
+  headless: true,
+  proxy: { server: 'http://proxy:8080' }  // Optional
+});
+
+console.log(`Found ${results.metadata.totalResults} total results`);
+console.log(`Scraped ${results.results.length} results`);
 ```
 
 ### Full Details Search

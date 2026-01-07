@@ -25,7 +25,7 @@
 import 'dotenv/config';
 
 import { parseArgs } from 'util';
-import { IMPIApiClient, IMPIConcurrentPool, generateSessionTokens, generateSearch, generateBatchSearch, countTrademarks } from './src/index.ts';
+import { IMPIApiClient, IMPIConcurrentPool, generateSessionTokens, generateSearch, generateBatchSearch, countTrademarks, searchByUrl, parseIMPISearchUrl } from './src/index.ts';
 import { parseProxyUrl } from './src/utils/proxy.ts';
 import { fetchProxiesFromEnv, fetchProxies, parseProxyProviderFromEnv } from './src/utils/proxy-provider.ts';
 import type { SearchResults, ProxyConfig } from './src/types.ts';
@@ -35,6 +35,7 @@ IMPI Trademark Scraper CLI
 
 USAGE:
   pnpm run search <keyword> [options]
+  tsx cli.ts search-url <url>              # Scrape ALL results from an IMPI search URL
   tsx cli.ts search-many <keyword1> <keyword2> ... [options]
   tsx cli.ts generate-search <keyword>     # For serverless/queue workflows
   tsx cli.ts generate-batch <q1> <q2> ...  # Batch generation (one browser session)
@@ -44,6 +45,7 @@ USAGE:
 
 COMMANDS:
   search <keyword>         Search trademarks by keyword
+  search-url <url>         Scrape ALL results from an IMPI search URL (with filters pre-applied)
   search-many <keywords>   Search multiple keywords concurrently (with proxies)
   generate-search <query>  Generate tokens + searchId for serverless (outputs JSON)
   generate-batch <queries> Generate tokens + searchIds for multiple queries (one browser session)
@@ -96,6 +98,13 @@ EXAMPLES:
 
   # Debug mode (saves screenshots on CAPTCHA/blocking)
   tsx cli.ts search vitrum --debug --visible
+
+URL SEARCH (with pre-applied filters):
+  # Scrape ALL results from an IMPI search URL
+  tsx cli.ts search-url "https://marcia.impi.gob.mx/marcas/search/result?s=UUID&m=l"
+
+  # With output file and full details
+  tsx cli.ts search-url "https://marcia.impi.gob.mx/marcas/search/result?s=UUID" --full -o results.json
 
 SERVERLESS/QUEUE WORKFLOW:
   # Generate tokens + searchId locally, then process in serverless
@@ -738,6 +747,90 @@ async function runGenerateBatch(queries: string[], options: CLIOptions): Promise
   }
 }
 
+async function runSearchByUrl(url: string, options: CLIOptions): Promise<void> {
+  console.error(`Searching IMPI by URL...`);
+  console.error(`URL: ${url}`);
+  console.error(`Details: ${options.full ? 'full' : 'basic'} | Human: ${options.human ? 'on' : 'off'}${options.debug ? ' | Debug: ON' : ''}`);
+
+  // Validate URL
+  const searchId = parseIMPISearchUrl(url);
+  if (!searchId) {
+    console.error('Error: Invalid IMPI search URL');
+    console.error('Expected format: https://marcia.impi.gob.mx/marcas/search/result?s=UUID&m=l');
+    process.exit(1);
+  }
+  console.error(`Search ID: ${searchId}`);
+
+  // Resolve proxy: explicit URL > auto-fetch > env > none
+  let proxy: ProxyConfig | undefined;
+  if (options.proxy) {
+    proxy = parseProxyUrl(options.proxy);
+    console.error(`Proxy: ${proxy.server}`);
+  } else if (options.autoProxy) {
+    const providerConfig = parseProxyProviderFromEnv();
+    if (!providerConfig) {
+      console.error('Error: --proxy requires IPFOXY_API_TOKEN to be set for auto-fetch');
+      console.error('Either set IPFOXY_API_TOKEN or provide a proxy URL: --proxy http://user:pass@host:port');
+      process.exit(1);
+    }
+    console.error(`Fetching proxy from ${providerConfig.provider}...`);
+    try {
+      const result = await fetchProxies(providerConfig, 1);
+      if (result.proxies.length === 0) {
+        throw new Error('No proxies returned');
+      }
+      proxy = result.proxies[0];
+      console.error(`Proxy: ${proxy!.server} (auto-fetched)`);
+    } catch (err) {
+      console.error(`Error fetching proxy: ${(err as Error).message}`);
+      process.exit(1);
+    }
+  } else {
+    console.error(`Proxy: from env or none`);
+  }
+  console.error('');
+
+  try {
+    const results = await searchByUrl(url, {
+      headless: true,
+      detailLevel: options.full ? 'full' : 'basic',
+      humanBehavior: options.human,
+      apiRateLimitMs: options.rateLimit,
+      maxResults: options.limit || 0,
+      proxy,
+      debug: options.debug,
+    });
+
+    // Format output
+    let output: string;
+    switch (options.format) {
+      case 'table':
+        output = formatTable(results);
+        break;
+      case 'summary':
+        output = formatSummary(results);
+        break;
+      case 'json':
+      default:
+        output = JSON.stringify(results, null, 2);
+    }
+
+    // Output to file or stdout
+    if (options.output) {
+      const { writeFileSync } = await import('fs');
+      writeFileSync(options.output, output);
+      console.error(`Results saved to: ${options.output}`);
+    } else {
+      console.log(output);
+    }
+
+    console.error(`\nDone! Found ${results.metadata.totalResults} results, processed ${results.results.length}`);
+  } catch (error) {
+    console.error(`Error: ${(error as Error).message}`);
+    process.exit(1);
+  }
+}
+
 async function main(): Promise<void> {
   const { command, keywords, options } = parseCliArgs();
 
@@ -786,6 +879,23 @@ async function main(): Promise<void> {
       process.exit(1);
     }
     await runGenerateBatch(keywords, options);
+    return;
+  }
+
+  if (command === 'search-url') {
+    const url = keywords.join(' ');
+    if (!url) {
+      console.error('Error: URL is required');
+      console.error('Usage: tsx cli.ts search-url <url>');
+      console.error('Example: tsx cli.ts search-url "https://marcia.impi.gob.mx/marcas/search/result?s=UUID&m=l"');
+      process.exit(1);
+    }
+    try {
+      await runSearchByUrl(url, options);
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exit(1);
+    }
     return;
   }
 

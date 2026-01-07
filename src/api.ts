@@ -52,6 +52,41 @@ export async function searchTrademarks(query: string, options: IMPIScraperOption
 }
 
 /**
+ * Parse an IMPI search URL and extract the searchId
+ * @param url - IMPI search URL (e.g., https://marcia.impi.gob.mx/marcas/search/result?s=UUID&m=l&page=1)
+ * @returns The extracted searchId or null if not found
+ */
+export function parseIMPISearchUrl(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    // Validate it's an IMPI URL
+    if (!parsed.hostname.includes('impi.gob.mx')) {
+      return null;
+    }
+    // Extract searchId from 's' parameter
+    return parsed.searchParams.get('s');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Search IMPI trademarks by URL
+ * Accepts an existing IMPI search URL (with filters already applied) and scrapes all results
+ * @param url - IMPI search URL (e.g., https://marcia.impi.gob.mx/marcas/search/result?s=UUID&m=l&page=1)
+ * @param options - Client options
+ * @returns Search results with metadata
+ */
+export async function searchByUrl(url: string, options: IMPIScraperOptions = {}): Promise<SearchResults> {
+  const client = new IMPIApiClient(options);
+  try {
+    return await client.searchByUrl(url);
+  } finally {
+    await client.close();
+  }
+}
+
+/**
  * Get only the total count of results for a keyword (no records fetched)
  * Uses IMPIApiClient under the hood; still requires a valid session token
  */
@@ -873,6 +908,113 @@ export class IMPIApiClient {
         executedAt: new Date().toISOString(),
         searchId,
         searchUrl: `${IMPI_CONFIG.baseUrl}/marcas/search/result?s=${searchId}&m=l`,
+        totalResults,
+        externalIp: null
+      },
+      results,
+      performance: {
+        durationMs: duration,
+        avgPerResultMs: results.length > 0 ? Math.round(duration / results.length) : 0
+      }
+    };
+  }
+
+  /**
+   * Search by URL - accepts an existing IMPI search URL and scrapes all results
+   * This is useful when you've manually applied filters on the IMPI website and want to scrape all matching results.
+   * @param url - IMPI search URL (e.g., https://marcia.impi.gob.mx/marcas/search/result?s=UUID&m=l&page=1)
+   * @returns Search results with metadata
+   */
+  async searchByUrl(url: string): Promise<SearchResults> {
+    const startTime = Date.now();
+    log.info(`Searching by URL: ${url}`);
+
+    // Parse URL and extract searchId
+    const searchId = parseIMPISearchUrl(url);
+    if (!searchId) {
+      throw createError('PARSE_ERROR', `Invalid IMPI search URL: ${url}. Expected format: https://marcia.impi.gob.mx/marcas/search/result?s=UUID`, { url });
+    }
+
+    log.info(`Extracted searchId: ${searchId}`);
+
+    // Initialize session to get API tokens (doesn't need browser search)
+    await this.initSession();
+
+    // Fetch first page to get total results count
+    const firstPage = await this.getSearchResults(searchId, 0, 100);
+    const totalResults = firstPage.totalResults;
+
+    log.info(`Found ${totalResults} total results for search ${searchId}`);
+
+    if (totalResults === 0) {
+      return {
+        metadata: {
+          query: `[URL Search: ${searchId}]`,
+          executedAt: new Date().toISOString(),
+          searchId,
+          searchUrl: url,
+          totalResults: 0,
+          externalIp: null
+        },
+        results: [],
+        performance: {
+          durationMs: Date.now() - startTime,
+          avgPerResultMs: 0
+        }
+      };
+    }
+
+    // Fetch all pages via direct API
+    const allResults: IMPITrademarkRaw[] = [...firstPage.resultPage];
+    const pageSize = 100;
+    const totalPages = Math.ceil(totalResults / pageSize);
+
+    // Start from page 1 since we already have page 0
+    for (let page = 1; page < totalPages; page++) {
+      log.info(`Fetching page ${page + 1}/${totalPages}...`);
+      const pageResults = await this.getSearchResults(searchId, page, pageSize);
+      allResults.push(...pageResults.resultPage);
+
+      // Apply max results limit
+      if (this.options.maxResults > 0 && allResults.length >= this.options.maxResults) {
+        break;
+      }
+    }
+
+    // Process results
+    const limit = this.options.maxResults > 0 ? this.options.maxResults : allResults.length;
+    const toProcess = allResults.slice(0, limit);
+
+    const results: TrademarkResult[] = [];
+    const queryLabel = `[URL Search: ${searchId.substring(0, 8)}...]`;
+
+    // Fetch details if full mode
+    if (this.options.detailLevel === 'full') {
+      for (const trademark of toProcess) {
+        try {
+          const details = await this.getTrademarkDetails(trademark.id, searchId);
+          results.push(this.extractTrademarkData(trademark, details, queryLabel, searchId));
+        } catch (err) {
+          log.warning(`Failed to get details for ${trademark.id}: ${(err as Error).message}`);
+          // Add basic result on failure
+          results.push(this.extractBasicData(trademark, queryLabel, searchId));
+        }
+      }
+    } else {
+      // Basic mode - no detail fetching
+      for (const trademark of toProcess) {
+        results.push(this.extractBasicData(trademark, queryLabel, searchId));
+      }
+    }
+
+    const duration = Date.now() - startTime;
+
+    return {
+      metadata: {
+        query: queryLabel,
+        executedAt: new Date().toISOString(),
+        searchId,
+        searchUrl: url,
         totalResults,
         externalIp: null
       },
