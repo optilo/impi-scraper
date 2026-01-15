@@ -49,3 +49,7 @@ bun.lock
 # Development/stress test files
 trademarks.txt
 scripts/
+
+# Temp files
+*.progress.jsonl
+convert-progress.ts
