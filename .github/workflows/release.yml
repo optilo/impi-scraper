@@ -14,17 +14,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
 
       - name: Install dependencies
-        run: bun install
+        run: pnpm install
+
+      - name: Build
+        run: pnpm run build
 
       - name: Run tests
-        run: bun test src/
+        run: pnpm test
 
       - name: Type check
-        run: bun run typecheck
+        run: pnpm run typecheck
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
