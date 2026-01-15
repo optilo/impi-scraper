@@ -12,8 +12,16 @@
  * - Looks like normal API traffic to server
  */
 
-import { Camoufox } from 'camoufox-js';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
+
+// Lazy load Camoufox to avoid import.meta.dirname issues with CJS bundlers like tsx
+let _CamoufoxModule: typeof import('camoufox-js') | null = null;
+async function getCamoufox() {
+  if (!_CamoufoxModule) {
+    _CamoufoxModule = await import('camoufox-js');
+  }
+  return _CamoufoxModule.Camoufox;
+}
 import { log } from './utils/logger.js';
 import { addHumanBehavior, randomDelay } from './utils/human-behavior.js';
 import { resolveProxyConfig, formatProxyForCamoufox } from './utils/proxy.js';
@@ -257,6 +265,7 @@ export class IMPIApiClient {
       }
     }
 
+    const Camoufox = await getCamoufox();
     this.browser = await Camoufox({
       headless: this.options.headless,
       geoip: true,
@@ -324,6 +333,7 @@ export class IMPIApiClient {
             
             // Create new browser with new proxy
             const formattedProxy = formatProxyForCamoufox(this.options.proxy);
+            const Camoufox = await getCamoufox();
             this.browser = await Camoufox({
               headless: this.options.headless,
               geoip: true,
@@ -553,6 +563,7 @@ export class IMPIApiClient {
     // Need browser for initial search to get searchId
     if (!this.browser || !this.browser.isConnected()) {
       const formattedProxy = formatProxyForCamoufox(this.options.proxy);
+      const Camoufox = await getCamoufox();
       this.browser = await Camoufox({
         headless: this.options.headless,
         geoip: true,
@@ -709,6 +720,7 @@ export class IMPIApiClient {
           // Ensure browser is created
           if (!this.browser) {
             const formattedProxy = formatProxyForCamoufox(this.options.proxy);
+            const Camoufox = await getCamoufox();
             this.browser = await Camoufox({
               headless: this.options.headless,
               geoip: true,
@@ -927,6 +939,7 @@ export class IMPIApiClient {
     totalPages: number;
     resultsFetched: number;
     totalResults: number;
+    effectiveLimit: number; // min(maxResults, totalResults) or totalResults if no limit
     results: TrademarkResult[];
   }) => void | Promise<void>;
 
@@ -999,6 +1012,11 @@ export class IMPIApiClient {
     const allResults: TrademarkResult[] = [];
     const queryLabel = `[URL Search: ${searchId.substring(0, 8)}...]`;
 
+    // Calculate effective limit for progress display (use totalResults if no limit)
+    const effectiveLimit = this.options.maxResults > 0
+      ? Math.min(this.options.maxResults, totalResults)
+      : totalResults;
+
     // Process first page results
     const firstPageResults = this.processRawResults(firstPage.resultPage, queryLabel, searchId);
     allResults.push(...firstPageResults);
@@ -1010,6 +1028,7 @@ export class IMPIApiClient {
         totalPages,
         resultsFetched: allResults.length,
         totalResults,
+        effectiveLimit,
         results: firstPageResults
       });
     }
@@ -1054,6 +1073,7 @@ export class IMPIApiClient {
               totalPages,
               resultsFetched: allResults.length,
               totalResults,
+              effectiveLimit,
               results: processedResults
             });
           }
@@ -1067,7 +1087,10 @@ export class IMPIApiClient {
     } else {
       // Sequential fetching (original behavior)
       for (const page of remainingPages) {
-        log.info(`Fetching page ${page + 1}/${totalPages} (offset: ${page * pageSize})...`);
+        // Only log if no callback is set (callback handles its own progress display)
+        if (!this.onPageFetched) {
+          log.info(`Fetching page ${page + 1}/${totalPages} (offset: ${page * pageSize})...`);
+        }
 
         const pageResults = await this.getSearchResults(searchId, page, pageSize);
         const processedResults = this.processRawResults(pageResults.resultPage, queryLabel, searchId);
@@ -1080,6 +1103,7 @@ export class IMPIApiClient {
             totalPages,
             resultsFetched: allResults.length,
             totalResults,
+            effectiveLimit,
             results: processedResults
           });
         }
@@ -1727,6 +1751,7 @@ export async function generateSessionTokens(options: GenerateTokensOptions = {})
     log.info(`Using proxy: ${proxy.server}`);
   }
 
+  const Camoufox = await getCamoufox();
   const browser = await Camoufox({
     headless,
     geoip: true,
@@ -1847,6 +1872,7 @@ export async function generateSearchId(
 
   const formattedProxy = formatProxyForCamoufox(proxy);
 
+  const Camoufox = await getCamoufox();
   const browser = await Camoufox({
     headless,
     geoip: true,
@@ -2048,6 +2074,7 @@ export async function generateBatchSearch(
   const formattedProxy = formatProxyForCamoufox(proxy);
 
   // Create browser session that we'll reuse for all searches
+  const Camoufox = await getCamoufox();
   const browser = await Camoufox({
     headless,
     geoip: true,
