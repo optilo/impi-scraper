@@ -879,9 +879,12 @@ async function runSearchByUrl(url: string, options: CLIOptions): Promise<void> {
       debug: options.debug,
     });
 
+    // Track last resume page shown to avoid duplicates
+    let lastResumePage = -1;
+
     // Set up progress callback for incremental saving
     client.onPageFetched = async (progress) => {
-      const { page, totalPages, resultsFetched, totalResults, results: pageResults } = progress;
+      const { page, totalPages, resultsFetched, totalResults, effectiveLimit, results: pageResults } = progress;
 
       // Calculate timing
       const now = Date.now();
@@ -893,19 +896,21 @@ async function runSearchByUrl(url: string, options: CLIOptions): Promise<void> {
       const remainingPages = totalPages - page - 1;
       const eta = formatETA(remainingPages, avgPageTime / (options.concurrency || 1));
 
-      // Clear line and print progress
-      process.stderr.write('\r\x1b[K'); // Clear current line
-
-      // Progress bar
-      const progressBar = formatProgressBar(resultsFetched, totalResults);
+      // Progress bar - use effectiveLimit for accurate percentage when limit is set
+      const progressBar = formatProgressBar(resultsFetched, effectiveLimit);
       const pageInfo = `Page ${page + 1}/${totalPages}`;
-      const resultsInfo = `${resultsFetched.toLocaleString()}/${totalResults.toLocaleString()} results`;
+      // Show both current/limit and total if they differ
+      const resultsInfo = effectiveLimit < totalResults
+        ? `${resultsFetched.toLocaleString()}/${effectiveLimit.toLocaleString()} (of ${totalResults.toLocaleString()})`
+        : `${resultsFetched.toLocaleString()}/${totalResults.toLocaleString()}`;
 
-      console.error(`${progressBar} ${pageInfo} | ${resultsInfo} | ETA: ${eta}`);
+      // Single-line progress update (overwrites previous line)
+      process.stderr.write(`\r\x1b[K${progressBar} ${pageInfo} | ${resultsInfo} | ETA: ${eta}`);
 
-      // Show resume info (less verbose)
-      if (page % 10 === 0 || page === totalPages - 1) {
-        console.error(`  💾 Resume: --start-page ${page + 1}`);
+      // Show resume info every 50 pages on a new line, then continue progress on same line
+      if ((page + 1) % 50 === 0 && page !== lastResumePage) {
+        lastResumePage = page;
+        process.stderr.write(`\n  💾 Resume: --start-page ${page + 1}\n`);
       }
 
       // Save results incrementally to progress file (JSONL format) - but not in full mode (we save per detail)
@@ -923,6 +928,8 @@ async function runSearchByUrl(url: string, options: CLIOptions): Promise<void> {
     let pdfUrlsFound = 0;
 
     if (options.full) {
+      let lastResumeDetail = -1;
+
       client.onDetailFetched = async (progress) => {
         const { current, total, result, hasHistory, pdfUrls } = progress;
 
@@ -938,19 +945,18 @@ async function runSearchByUrl(url: string, options: CLIOptions): Promise<void> {
         const etaMs = remainingDetails * (avgDetailTime / (options.detailsConcurrency || 1));
         const eta = formatDuration(etaMs);
 
-        // Clear line and print progress
-        process.stderr.write('\r\x1b[K'); // Clear current line
-
         // Progress bar
         const progressBar = formatProgressBar(current, total);
         const detailInfo = `Detail ${current.toLocaleString()}/${total.toLocaleString()}`;
         const pdfInfo = `PDFs: ${pdfUrlsFound.toLocaleString()}`;
 
-        console.error(`${progressBar} ${detailInfo} | ${pdfInfo} | ETA: ${eta}`);
+        // Single-line progress update (overwrites previous line)
+        process.stderr.write(`\r\x1b[K${progressBar} ${detailInfo} | ${pdfInfo} | ETA: ${eta}`);
 
-        // Show resume info periodically
-        if (current % 100 === 0 || current === total) {
-          console.error(`  💾 Resume: --start-detail ${current}`);
+        // Show resume info every 500 details on a new line
+        if (current % 500 === 0 && current !== lastResumeDetail) {
+          lastResumeDetail = current;
+          process.stderr.write(`\n  💾 Resume: --start-detail ${current}\n`);
         }
 
         // Save result incrementally to progress file (JSONL format)
@@ -971,6 +977,9 @@ async function runSearchByUrl(url: string, options: CLIOptions): Promise<void> {
     });
     await client.close();
     const totalTime = Date.now() - startTime;
+
+    // Print newline after progress bar to separate from completion message
+    process.stderr.write('\n');
 
     // Format final output
     let output: string;
